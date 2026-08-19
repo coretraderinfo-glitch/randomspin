@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model AdminUser {
+  id           String         @id @default(uuid())
+  email        String         @unique
+  passwordHash String
+  role         String         @default("OWNER")
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  lastLoginAt  DateTime?
+  sessions     AdminSession[]
+  auditLogs    AuditLog[]
+}
+
+model AdminSession {
+  id          String    @id @default(uuid())
+  tokenHash   String    @unique
+  adminUserId String
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  revokedAt   DateTime?
+
+  @@index([adminUserId])
+  @@index([expiresAt])
+}
+
+model WheelConfiguration {
+  id              String       @id @default(uuid())
+  name            String       @default("Default Wheel")
+  minNumber       Int          @default(1)
+  maxNumber       Int          @default(30)
+  excludedNumbers Int[]        @default([])
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  spinResults     SpinResult[]
+}
+
+model SpinResult {
+  id                   String             @id @default(uuid())
+  wheelConfigurationId String
+  wheelConfiguration   WheelConfiguration @relation(fields: [wheelConfigurationId], references: [id])
+  requestedMin         Int
+  requestedMax         Int
+  winningNumber        Int
+  eligibleCount        Int
+  hashedIp             String?
+  userAgent            String?
+  createdAt            DateTime           @default(now())
+
+  @@index([createdAt])
+  @@index([winningNumber])
+  @@index([requestedMin, requestedMax])
+}
+
+model SiteSettings {
+  id                      String   @id @default(uuid())
+  siteName                String   @default("Lucky Spin")
+  headline                String   @default("SPIN YOUR LUCK")
+  subtitle                String   @default("Let the wheel choose.")
+  announcement            String?
+  soundEnabled            Boolean  @default(true)
+  confettiEnabled         Boolean  @default(true)
+  maintenanceMode         Boolean  @default(false)
+  recentResultCount       Int      @default(10)
+  defaultFrom             Int      @default(1)
+  defaultTo               Int      @default(30)
+  maximumAllowedRange     Int      @default(1000)
+  publicDisclosureMessage String   @default("Results are selected from the configured eligible number pool.")
+  timezone                String   @default("Asia/Kuala_Lumpur")
+  contactEmail            String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+}
+
+model AuditLog {
+  id          String     @id @default(uuid())
+  adminUserId String?
+  adminUser   AdminUser? @relation(fields: [adminUserId], references: [id], onDelete: SetNull)
+  action      String
+  target      String
+  metadata    Json?
+  createdAt   DateTime   @default(now())
+
+  @@index([createdAt])
+  @@index([adminUserId])
+}
