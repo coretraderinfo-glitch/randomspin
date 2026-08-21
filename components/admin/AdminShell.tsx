@@ -1,10 +1,12 @@
-import { BarChart3, History, LayoutDashboard, LogOut, Settings, SlidersHorizontal } from "lucide-react";
+import { BarChart3, History, LayoutDashboard, LogOut, Settings, SlidersHorizontal, Ticket, Users } from "lucide-react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { LogoutButton } from "@/components/admin/LogoutButton";
 
 const navItems = [
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/wheel", label: "Wheel Control", icon: SlidersHorizontal },
+  { href: "/admin/draws", label: "Private Draws", icon: Ticket },
+  { href: "/admin/player-draws", label: "Player Draws", icon: Users },
   { href: "/admin/history", label: "Spin History", icon: History },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/admin/settings", label: "Website Settings", icon: Settings }

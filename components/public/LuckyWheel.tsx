@@ -1,5 +1,6 @@
 "use client";
 
+import type { RefObject } from "react";
 import { motion } from "framer-motion";
 import { calculateTargetRotation, getWheelVisualPlan } from "@/lib/wheel-visual";
 
@@ -7,8 +8,12 @@ type LuckyWheelProps = {
   from: number;
   to: number;
   winner: number | null;
+  highlightedWinner?: number | null;
+  pointerRef?: RefObject<HTMLDivElement | null>;
+  wheelRef?: RefObject<SVGSVGElement | null>;
   rotation: number;
   spinning: boolean;
+  buttonLabel?: "SPIN" | "SPIN AGAIN";
   onSpin: () => void;
 };
 
@@ -36,7 +41,18 @@ function describeArc(cx: number, cy: number, r: number, startAngle: number, endA
 
 export { calculateTargetRotation };
 
-export function LuckyWheel({ from, to, winner, rotation, spinning, onSpin }: LuckyWheelProps) {
+export function LuckyWheel({
+  from,
+  to,
+  winner,
+  highlightedWinner = null,
+  pointerRef,
+  wheelRef,
+  rotation,
+  spinning,
+  buttonLabel = "SPIN",
+  onSpin
+}: LuckyWheelProps) {
   const plan = getWheelVisualPlan(from, to, winner);
   const count = plan.rangeSize;
   const visualCount = plan.renderedSegmentCount;
@@ -50,23 +66,34 @@ export function LuckyWheel({ from, to, winner, rotation, spinning, onSpin }: Luc
     const labelAngle = cleanNumber(start + segmentAngle / 2);
     const label = showEvery && index % showEvery === 0 ? String(value) : "";
     const labelPosition = polarToCartesian(250, 250, count <= 24 ? 158 : 170, labelAngle);
+    const highlighted = plan.mode === "numbered" && highlightedWinner === value;
 
     return {
       path: describeArc(250, 250, 218, start, end),
       color: colors[index % colors.length],
       label,
       labelAngle,
-      labelPosition
+      labelPosition,
+      highlighted,
+      value
     };
   });
 
   return (
     <div className="relative mx-auto aspect-square w-full min-w-0" style={{ maxWidth: "clamp(300px, 78vw, 560px)" }}>
-      <div className="pointer-events-none absolute left-1/2 top-[-2px] z-20 -translate-x-1/2">
+      <div
+        ref={pointerRef}
+        className="pointer-events-none absolute left-1/2 top-[-2px] z-20 -translate-x-1/2"
+        style={{ transformOrigin: "50% 0%" }}
+      >
         <div className="h-0 w-0 border-x-[17px] border-t-[34px] border-x-transparent border-t-[#f6d98f] drop-shadow-[0_7px_18px_rgba(246,217,143,0.5)]" />
       </div>
       {plan.mode === "large-range" ? (
-        <div className="pointer-events-none absolute left-1/2 top-9 z-30 -translate-x-1/2 rounded-full border border-[rgba(246,217,143,0.5)] bg-[#080b18]/85 px-4 py-2 text-center shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md">
+        <div
+          className={`pointer-events-none absolute left-1/2 top-9 z-30 -translate-x-1/2 rounded-full border border-[rgba(246,217,143,0.5)] bg-[#080b18]/85 px-4 py-2 text-center shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md ${
+            highlightedWinner !== null ? "animate-pulse shadow-[0_0_38px_rgba(246,217,143,0.42)]" : ""
+          }`}
+        >
           <p className="text-[9px] font-black uppercase tracking-[0.18em] text-[#aeb7ca]">Exact Result</p>
           <p className="gold-text font-[var(--font-display)] text-xl font-black leading-none">
             {spinning || winner === null ? "..." : plan.visualTargetResult}
@@ -74,12 +101,12 @@ export function LuckyWheel({ from, to, winner, rotation, spinning, onSpin }: Luc
         </div>
       ) : null}
 
-      <motion.svg
+      <svg
+        ref={wheelRef}
         viewBox="0 0 500 500"
-        className="h-full w-full overflow-visible drop-shadow-[0_32px_90px_rgba(0,0,0,0.62)]"
-        animate={{ rotate: rotation }}
-        transition={{ duration: spinning ? 5.8 : 0.3, ease: [0.12, 0.78, 0.14, 1] }}
-        aria-label="Lucky Spin wheel"
+        className="h-full w-full overflow-visible drop-shadow-[0_24px_64px_rgba(0,0,0,0.54)]"
+        style={{ transform: `rotate(${rotation}deg)`, transformOrigin: "50% 50%", willChange: spinning ? "transform" : "auto" }}
+        aria-label="RandomSpin number wheel"
       >
         <defs>
           <radialGradient id="wheel-glow" cx="50%" cy="45%">
@@ -99,6 +126,19 @@ export function LuckyWheel({ from, to, winner, rotation, spinning, onSpin }: Luc
         {segments.map((segment, index) => (
           <g key={index}>
             <path d={segment.path} fill={segment.color} stroke="rgba(255,255,255,0.18)" strokeWidth="1" />
+            {segment.highlighted ? (
+              <motion.path
+                d={segment.path}
+                fill="rgba(246,217,143,0.18)"
+                stroke="#fff0b2"
+                strokeWidth="5"
+                data-testid="winning-segment"
+                data-winning-number={segment.value}
+                initial={false}
+                animate={{ opacity: [0.52, 1, 0.7] }}
+                transition={{ duration: 1.25, repeat: 4, ease: "easeInOut" }}
+              />
+            ) : null}
             {segment.label ? (
               <text
                 x={segment.labelPosition.x}
@@ -125,16 +165,16 @@ export function LuckyWheel({ from, to, winner, rotation, spinning, onSpin }: Luc
           {plan.mode === "large-range" ? `${from}-${to}` : "LUCKY"}
         </text>
         <path d="M145 95 C230 45 342 63 400 140" fill="none" stroke="rgba(255,255,255,0.24)" strokeWidth="14" strokeLinecap="round" />
-      </motion.svg>
+      </svg>
 
       <button
         type="button"
         className="gold-button focus-ring absolute left-1/2 top-1/2 z-30 grid size-[108px] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full text-lg transition hover:scale-[1.03] active:scale-95 disabled:opacity-70"
         onClick={onSpin}
         disabled={spinning}
-        aria-label="Spin the wheel"
+        aria-label={buttonLabel}
       >
-        {spinning ? "..." : winner === null ? "SPIN" : "AGAIN"}
+        {buttonLabel}
       </button>
     </div>
   );

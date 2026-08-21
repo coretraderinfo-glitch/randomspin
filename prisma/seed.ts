@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
+import { serializeExcludedNumbers } from "../lib/excluded-numbers";
 
 const prisma = new PrismaClient();
 
@@ -12,14 +13,20 @@ async function main() {
       name: "Default Wheel",
       minNumber: 1,
       maxNumber: 30,
-      excludedNumbers: []
+      excludedNumbers: serializeExcludedNumbers([])
     }
   });
 
   await prisma.siteSettings.upsert({
     where: { id: "default" },
     update: {},
-    create: { id: "default" }
+    create: {
+      id: "default",
+      siteName: "RandomSpin",
+      headline: "RandomSpin",
+      subtitle: "Free random draws for names, numbers, and more.",
+      publicDisclosureMessage: "Results are selected from the configured eligible pool."
+    }
   });
 
   const email = process.env.ADMIN_BOOTSTRAP_EMAIL;

@@ -1,10 +1,10 @@
 {
-  "name": "lucky-spin",
+  "name": "randomspin",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev",
+    "dev": "prisma generate --schema prisma/schema.dev.prisma && next dev",
     "start": "next start",
     "build": "prisma generate && next build --webpack",
     "lint": "eslint .",
@@ -13,9 +13,11 @@
     "test:watch": "vitest",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
-    "db:dev": "prisma migrate dev",
+    "db:dev": "node --disable-warning=ExperimentalWarning scripts/setup-sqlite-dev.mjs && prisma generate --schema prisma/schema.dev.prisma",
     "db:seed": "tsx prisma/seed.ts",
     "admin:bootstrap": "tsx scripts/bootstrap-admin.ts",
+    "verify:staging": "tsx scripts/verify-staging.ts",
+    "verify:upstash": "tsx scripts/verify-upstash.ts",
     "format": "prettier --write ."
   },
   "dependencies": {

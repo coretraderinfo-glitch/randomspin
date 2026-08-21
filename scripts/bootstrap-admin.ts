@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
+import { serializeAuditMetadata } from "../lib/audit-metadata";
 
 const prisma = new PrismaClient();
 
@@ -26,7 +27,7 @@ async function main() {
     data: {
       action: "ADMIN_BOOTSTRAPPED",
       target: "AdminUser",
-      metadata: { email }
+      metadata: serializeAuditMetadata({ email })
     }
   });
 

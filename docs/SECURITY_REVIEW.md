@@ -1,4 +1,4 @@
-# Lucky Spin Security Review
+# RandomSpin Security Review
 
 Date: 19 August 2026
 

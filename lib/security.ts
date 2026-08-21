@@ -8,7 +8,7 @@ export function sanitizeUserAgent(userAgent: string | null) {
 }
 
 export function getClientIp(request: NextRequest) {
-  if (process.env.VERCEL || process.env.TRUST_PROXY_HEADERS === "true") {
+  if (process.env.VERCEL || process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.TRUST_PROXY_HEADERS === "true") {
     return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown";
   }
 

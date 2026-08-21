@@ -1,0 +1,1 @@
+ALTER TABLE "PrivateDraw" ADD COLUMN "displayStyle" TEXT NOT NULL DEFAULT 'WHEEL';

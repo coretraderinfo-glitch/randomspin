@@ -40,7 +40,7 @@ export function LoginForm() {
         <Lock className="size-5 text-[#f6d98f]" />
       </div>
       <h1 className="mt-5 font-[var(--font-display)] text-3xl font-black text-white">Admin Login</h1>
-      <p className="mt-2 text-sm text-[#aeb7ca]">Private management access for Lucky Spin.</p>
+      <p className="mt-2 text-sm text-[#aeb7ca]">Private management access for RandomSpin.</p>
       <label className="mt-6 block">
         <span className="mb-2 block text-xs font-black uppercase tracking-[0.18em] text-[#aeb7ca]">Email</span>
         <input
@@ -63,7 +63,7 @@ export function LoginForm() {
           required
         />
       </label>
-      {error ? <p className="mt-4 rounded-lg border border-rose-300/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</p> : null}
+      {error ? <p className="danger-banner mt-4 rounded-lg px-4 py-3 text-sm font-semibold">{error}</p> : null}
       <button className="gold-button focus-ring mt-6 w-full rounded-lg px-5 py-3 text-sm uppercase tracking-[0.18em]" disabled={loading}>
         {loading ? "Signing In" : "Sign In"}
       </button>

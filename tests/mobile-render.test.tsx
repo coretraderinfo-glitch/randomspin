@@ -16,6 +16,6 @@ describe("mobile rendering basics", () => {
 
     expect(screen.getByRole("spinbutton", { name: "From" })).toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: "To" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Spin the wheel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "SPIN" })).toBeInTheDocument();
   });
 });

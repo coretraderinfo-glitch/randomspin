@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
     const [config, settings] = await Promise.all([getActiveWheelConfiguration(), getSiteSettings()]);
 
     if (settings.maintenanceMode) {
-      return jsonError("Lucky Spin is temporarily unavailable.", 503);
+      return jsonError("RandomSpin is temporarily unavailable.", 503);
     }
 
     const selection = selectSecureWinner(parsed.data.from, parsed.data.to, {

@@ -1,48 +1,55 @@
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import "./globals.css";
-import { getSiteUrl } from "@/lib/env";
+import { getSiteUrl, isPublicIndexingDisabled } from "@/lib/env";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   metadataBase: new URL(getSiteUrl()),
   title: {
-    default: "Lucky Spin - Free Online Random Number Wheel",
-    template: "%s | Lucky Spin"
+    default: "RandomSpin - Free Random Draws for Names, Numbers, and More",
+    template: "%s | RandomSpin"
   },
   description:
-    "Spin a premium random number wheel online. Lucky Spin is a free lucky number spinner, random number picker, and number wheel for games, giveaways, and quick decisions.",
+    "RandomSpin is a free web-based random draw tool for names, numbers, and more. Spin number draws, pick random players, and run simple live draws.",
   keywords: [
-    "Lucky Spin",
-    "Lucky Number Spinner",
+    "RandomSpin",
+    "Random Draw Tool",
     "Random Number Wheel",
     "Random Number Generator",
     "Random Number Picker",
+    "Random Name Picker",
     "Spin the Wheel",
-    "Free Lucky Draw",
-    "Online Lucky Spin",
-    "Number Wheel"
+    "Free Random Draw",
+    "Online Random Spin",
+    "Number Wheel",
+    "Player Draw"
   ],
   alternates: { canonical: "/" },
   openGraph: {
-    title: "Lucky Spin - Spin Your Luck",
-    description: "A premium free online random number wheel.",
+    title: "RandomSpin - Free Random Draws",
+    description: "A free web-based random draw platform for names, numbers, and more.",
     url: "/",
-    siteName: "Lucky Spin",
+    siteName: "RandomSpin",
     type: "website",
-    images: [{ url: "/opengraph-image", width: 1200, height: 630, alt: "Lucky Spin - Spin Your Luck" }]
+    images: [{ url: "/opengraph-image", width: 1200, height: 630, alt: "RandomSpin - Free Random Draws" }]
   },
   twitter: {
     card: "summary_large_image",
-    title: "Lucky Spin - Free Online Random Number Wheel",
-    description: "Spin a beautiful random number wheel and let the wheel choose.",
+    title: "RandomSpin - Free Random Draws for Names, Numbers, and More",
+    description: "Spin numbers, pick names, and run simple random draws in a clean web experience.",
     images: ["/opengraph-image"]
   },
   robots: {
-    index: true,
-    follow: true
+    index: !isPublicIndexingDisabled(),
+    follow: !isPublicIndexingDisabled()
   }
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  await connection();
+
   return (
     <html lang="en">
       <body>{children}</body>

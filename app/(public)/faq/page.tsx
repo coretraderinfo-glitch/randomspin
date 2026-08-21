@@ -2,14 +2,14 @@ import { BrandMark } from "@/components/ui/BrandMark";
 
 export const metadata = {
   title: "FAQ",
-  description: "Frequently asked questions about the Lucky Spin random number wheel."
+  description: "Frequently asked questions about RandomSpin random draw tools."
 };
 
 const faqs = [
-  ["Is Lucky Spin free?", "Yes. Lucky Spin is a free online number-selection utility."],
-  ["Where is the result chosen?", "The authoritative result is selected on the server before the wheel animation starts."],
-  ["Can I use it for giveaways?", "Yes, for casual games, lucky draws, classroom activities, and entertainment. It is not gambling software."],
-  ["Why might a range be unavailable?", "The configured eligible number pool may not have available results for that range."]
+  ["Is RandomSpin free?", "Yes. RandomSpin is a free online random draw utility for names, numbers, and more."],
+  ["Where is the result chosen?", "The server determines the result independently of the visual animation."],
+  ["Can I use it for giveaways?", "Yes, for casual games, random draws, classroom activities, and entertainment. It is not gambling software."],
+  ["Why might a range be unavailable?", "The configured eligible pool may not have available results for that range."]
 ];
 
 export default function FaqPage() {

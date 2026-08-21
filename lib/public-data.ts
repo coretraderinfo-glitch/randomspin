@@ -1,12 +1,13 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import { isDatabaseConfigured } from "@/lib/env";
+import { normalizeExcludedNumbers, serializeExcludedNumbers } from "@/lib/excluded-numbers";
 
 const fallbackSettings = {
   id: "default",
-  siteName: "Lucky Spin",
-  headline: "SPIN YOUR LUCK",
-  subtitle: "Let the wheel choose.",
+  siteName: "RandomSpin",
+  headline: "RandomSpin",
+  subtitle: "Free random draws for names, numbers, and more.",
   announcement: null,
   soundEnabled: true,
   confettiEnabled: true,
@@ -15,7 +16,7 @@ const fallbackSettings = {
   defaultFrom: 1,
   defaultTo: 30,
   maximumAllowedRange: 1000,
-  publicDisclosureMessage: "Results are selected from the configured eligible number pool.",
+  publicDisclosureMessage: "Results are selected from the configured eligible pool.",
   timezone: "Asia/Kuala_Lumpur",
   contactEmail: null,
   createdAt: new Date(),
@@ -44,18 +45,26 @@ export async function getActiveWheelConfiguration() {
   });
 
   if (existing) {
-    return existing;
+    return {
+      ...existing,
+      excludedNumbers: normalizeExcludedNumbers(existing.excludedNumbers)
+    };
   }
 
-  return prisma.wheelConfiguration.create({
+  const created = await prisma.wheelConfiguration.create({
     data: {
       id: "default",
       name: "Default Wheel",
       minNumber: 1,
       maxNumber: 30,
-      excludedNumbers: []
+      excludedNumbers: serializeExcludedNumbers([])
     }
   });
+
+  return {
+    ...created,
+    excludedNumbers: normalizeExcludedNumbers(created.excludedNumbers)
+  };
 }
 
 export async function getSiteSettings() {

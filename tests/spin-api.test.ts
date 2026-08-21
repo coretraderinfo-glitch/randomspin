@@ -62,6 +62,28 @@ describe("spin API", () => {
     expect(JSON.stringify(body)).not.toContain("admin");
   });
 
+  it("keeps the public homepage spin server-random and ignores forced winner input", async () => {
+    mocks.getActiveWheelConfiguration.mockResolvedValue({
+      id: "wheel-1",
+      minNumber: 1,
+      maxNumber: 30,
+      excludedNumbers: Array.from({ length: 29 }, (_, index) => index + 2)
+    });
+    mocks.spinCreate.mockResolvedValue({
+      id: "spin-1",
+      winningNumber: 1,
+      createdAt: new Date("2026-08-19T00:00:00.000Z")
+    });
+
+    const { POST } = await import("@/app/api/spin/route");
+    const response = await POST(request({ from: 1, to: 30, winner: 18, mode: "OPERATOR" }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.winner).toBe(1);
+    expect(body.winner).not.toBe(18);
+  });
+
   it("rejects invalid JSON", async () => {
     const { POST } = await import("@/app/api/spin/route");
     const response = await POST(request("{"));

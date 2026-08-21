@@ -14,6 +14,7 @@ export function NumberEligibilityGrid({ config }: { config: WheelConfig }) {
   const [maxNumber, setMaxNumber] = useState(config.maxNumber);
   const [excluded, setExcluded] = useState<number[]>(config.excludedNumbers);
   const [status, setStatus] = useState<string | null>(null);
+  const [statusTone, setStatusTone] = useState<"neutral" | "danger">("neutral");
   const [saving, setSaving] = useState(false);
 
   const numbers = useMemo(() => {
@@ -59,6 +60,7 @@ export function NumberEligibilityGrid({ config }: { config: WheelConfig }) {
     const data = (await response.json()) as { message?: string; error?: string };
 
     setSaving(false);
+    setStatusTone(response.ok ? "neutral" : "danger");
     setStatus(response.ok ? data.message ?? "Wheel configuration updated successfully." : data.error ?? "Save failed.");
   }
 
@@ -67,6 +69,7 @@ export function NumberEligibilityGrid({ config }: { config: WheelConfig }) {
     setMaxNumber(config.maxNumber);
     setExcluded(config.excludedNumbers);
     setStatus(null);
+    setStatusTone("neutral");
   }
 
   return (
@@ -126,7 +129,11 @@ export function NumberEligibilityGrid({ config }: { config: WheelConfig }) {
           </button>
         </div>
         {hasChanges ? <p className="mt-4 text-sm font-bold text-[#f6d98f]">Unsaved Changes</p> : null}
-        {status ? <p className="mt-3 text-sm text-[#aeb7ca]">{status}</p> : null}
+        {status ? (
+          <p className={statusTone === "danger" ? "danger-banner mt-3 rounded-lg px-4 py-3 text-sm font-semibold" : "mt-3 text-sm text-[#aeb7ca]"}>
+            {status}
+          </p>
+        ) : null}
       </div>
 
       <div className="glass rounded-xl p-5">
@@ -146,7 +153,7 @@ export function NumberEligibilityGrid({ config }: { config: WheelConfig }) {
                 onClick={() => toggle(number)}
                 className={`focus-ring flex h-12 items-center justify-center gap-1 rounded-lg border text-sm font-black transition ${
                   isExcluded
-                    ? "border-rose-300/20 bg-rose-500/12 text-rose-100 line-through"
+                    ? "danger-control line-through"
                     : "border-[rgba(246,217,143,0.22)] bg-[rgba(246,217,143,0.08)] text-white hover:bg-[rgba(246,217,143,0.14)]"
                 }`}
               >

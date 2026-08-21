@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getAdminFromRequest } from "@/lib/auth";
+import { serializeAuditMetadata } from "@/lib/audit-metadata";
 import { prisma } from "@/lib/db";
+import { normalizeExcludedNumbers, serializeExcludedNumbers } from "@/lib/excluded-numbers";
 import { jsonError, requireSameOrigin } from "@/lib/security";
 import { parseExcludedNumbers, SpinValidationError } from "@/lib/spin";
 
@@ -26,7 +28,14 @@ export async function GET(request: NextRequest) {
     orderBy: { createdAt: "asc" }
   });
 
-  return NextResponse.json({ config });
+  return NextResponse.json({
+    config: config
+      ? {
+          ...config,
+          excludedNumbers: normalizeExcludedNumbers(config.excludedNumbers)
+        }
+      : null
+  });
 }
 
 export async function PUT(request: NextRequest) {
@@ -70,13 +79,13 @@ export async function PUT(request: NextRequest) {
 
     const updated = await prisma.wheelConfiguration.upsert({
       where: { id: current?.id ?? "default" },
-      update: { minNumber, maxNumber, excludedNumbers },
+      update: { minNumber, maxNumber, excludedNumbers: serializeExcludedNumbers(excludedNumbers) },
       create: {
         id: "default",
         name: "Default Wheel",
         minNumber,
         maxNumber,
-        excludedNumbers
+        excludedNumbers: serializeExcludedNumbers(excludedNumbers)
       }
     });
 
@@ -85,20 +94,26 @@ export async function PUT(request: NextRequest) {
         adminUserId: admin.id,
         action: "WHEEL_CONFIGURATION_UPDATED",
         target: "WheelConfiguration",
-        metadata: {
+        metadata: serializeAuditMetadata({
           previous: current
             ? {
                 minNumber: current.minNumber,
                 maxNumber: current.maxNumber,
-                excludedNumbers: current.excludedNumbers
+                excludedNumbers: normalizeExcludedNumbers(current.excludedNumbers)
               }
             : null,
           next: { minNumber, maxNumber, excludedNumbers }
-        }
+        })
       }
     });
 
-    return NextResponse.json({ config: updated, message: "Wheel configuration updated successfully." });
+    return NextResponse.json({
+      config: {
+        ...updated,
+        excludedNumbers: normalizeExcludedNumbers(updated.excludedNumbers)
+      },
+      message: "Wheel configuration updated successfully."
+    });
   } catch (error) {
     if (error instanceof SpinValidationError) {
       return jsonError(error.message, 400);

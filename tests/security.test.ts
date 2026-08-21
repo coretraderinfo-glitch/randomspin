@@ -25,8 +25,10 @@ describe("security helpers", () => {
 
   it("does not trust proxy IP headers outside Vercel/trusted proxy mode", () => {
     const previousVercel = process.env.VERCEL;
+    const previousRailway = process.env.RAILWAY_ENVIRONMENT;
     const previousTrust = process.env.TRUST_PROXY_HEADERS;
     delete process.env.VERCEL;
+    delete process.env.RAILWAY_ENVIRONMENT;
     delete process.env.TRUST_PROXY_HEADERS;
 
     const request = new NextRequest("http://localhost:3000/api/spin", {
@@ -40,10 +42,33 @@ describe("security helpers", () => {
       process.env.VERCEL = previousVercel;
     }
 
+    if (previousRailway === undefined) {
+      delete process.env.RAILWAY_ENVIRONMENT;
+    } else {
+      process.env.RAILWAY_ENVIRONMENT = previousRailway;
+    }
+
     if (previousTrust === undefined) {
       delete process.env.TRUST_PROXY_HEADERS;
     } else {
       process.env.TRUST_PROXY_HEADERS = previousTrust;
+    }
+  });
+
+  it("trusts proxy IP headers on Railway", () => {
+    const previousRailway = process.env.RAILWAY_ENVIRONMENT;
+    process.env.RAILWAY_ENVIRONMENT = "staging";
+
+    const request = new NextRequest("https://randomspin-staging.up.railway.app/api/spin", {
+      headers: { "x-forwarded-for": "203.0.113.24, 10.0.0.4" }
+    });
+
+    expect(getClientIp(request)).toBe("203.0.113.24");
+
+    if (previousRailway === undefined) {
+      delete process.env.RAILWAY_ENVIRONMENT;
+    } else {
+      process.env.RAILWAY_ENVIRONMENT = previousRailway;
     }
   });
 });

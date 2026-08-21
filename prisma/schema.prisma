@@ -45,6 +45,27 @@ model WheelConfiguration {
   spinResults     SpinResult[]
 }
 
+model PrivateDraw {
+  id                    String                  @id @default(uuid())
+  publicCode            String                  @unique
+  name                  String                  @default("Private Draw")
+  minNumber             Int                     @default(1)
+  maxNumber             Int                     @default(30)
+  excludedNumbers       Int[]                   @default([])
+  /// Draw mode is intentionally stored as String for SQLite dev parity; validate through lib/private-draws.ts.
+  mode                  String                  @default("RANDOM")
+  /// Presentation-only display style; validate through lib/private-draw-display.ts.
+  displayStyle          String                  @default("WHEEL")
+  pendingOperatorWinner Int?
+  isActive              Boolean                 @default(true)
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  spinResults           PrivateDrawSpinResult[]
+
+  @@index([publicCode])
+  @@index([isActive])
+}
+
 model SpinResult {
   id                   String             @id @default(uuid())
   wheelConfigurationId String
@@ -62,11 +83,83 @@ model SpinResult {
   @@index([requestedMin, requestedMax])
 }
 
+model PrivateDrawSpinResult {
+  id            String      @id @default(uuid())
+  privateDrawId String
+  privateDraw   PrivateDraw @relation(fields: [privateDrawId], references: [id], onDelete: Cascade)
+  requestedMin  Int
+  requestedMax  Int
+  winningNumber Int
+  eligibleCount Int
+  /// Draw mode used for this result; validate values through lib/private-draws.ts.
+  mode          String
+  hashedIp      String?
+  userAgent     String?
+  createdAt     DateTime    @default(now())
+
+  @@index([privateDrawId])
+  @@index([createdAt])
+  @@index([winningNumber])
+}
+
+model PlayerDraw {
+  id                           String              @id @default(uuid())
+  publicCode                   String              @unique
+  name                         String              @default("Player Draw")
+  mode                         String              @default("RANDOM")
+  pendingOperatorParticipantId String?
+  pendingOperatorParticipant   PlayerParticipant?  @relation("PendingOperatorParticipant", fields: [pendingOperatorParticipantId], references: [id], onDelete: SetNull)
+  isActive                     Boolean             @default(true)
+  removeWinnerAfterWin         Boolean             @default(false)
+  showParticipantList          Boolean             @default(true)
+  showReferencesPublicly       Boolean             @default(true)
+  createdAt                    DateTime            @default(now())
+  updatedAt                    DateTime            @updatedAt
+  participants                 PlayerParticipant[] @relation("PlayerDrawParticipants")
+  results                      PlayerDrawResult[]
+
+  @@index([publicCode])
+  @@index([isActive])
+  @@index([pendingOperatorParticipantId])
+}
+
+model PlayerParticipant {
+  id                    String             @id @default(uuid())
+  playerDrawId          String
+  playerDraw            PlayerDraw         @relation("PlayerDrawParticipants", fields: [playerDrawId], references: [id], onDelete: Cascade)
+  displayName           String
+  reference             String?
+  isEligible            Boolean            @default(true)
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  pendingForPlayerDraws PlayerDraw[]        @relation("PendingOperatorParticipant")
+  results               PlayerDrawResult[]
+
+  @@index([playerDrawId])
+  @@index([isEligible])
+}
+
+model PlayerDrawResult {
+  id                  String             @id @default(uuid())
+  playerDrawId        String
+  playerDraw          PlayerDraw         @relation(fields: [playerDrawId], references: [id], onDelete: Cascade)
+  participantId       String?
+  participant         PlayerParticipant? @relation(fields: [participantId], references: [id], onDelete: SetNull)
+  displayNameSnapshot String
+  referenceSnapshot   String?
+  mode                String
+  createdAt           DateTime           @default(now())
+
+  @@index([playerDrawId])
+  @@index([participantId])
+  @@index([createdAt])
+}
+
 model SiteSettings {
   id                      String   @id @default(uuid())
-  siteName                String   @default("Lucky Spin")
-  headline                String   @default("SPIN YOUR LUCK")
-  subtitle                String   @default("Let the wheel choose.")
+  siteName                String   @default("RandomSpin")
+  headline                String   @default("RandomSpin")
+  subtitle                String   @default("Free random draws for names, numbers, and more.")
   announcement            String?
   soundEnabled            Boolean  @default(true)
   confettiEnabled         Boolean  @default(true)
@@ -75,7 +168,7 @@ model SiteSettings {
   defaultFrom             Int      @default(1)
   defaultTo               Int      @default(30)
   maximumAllowedRange     Int      @default(1000)
-  publicDisclosureMessage String   @default("Results are selected from the configured eligible number pool.")
+  publicDisclosureMessage String   @default("Results are selected from the configured eligible pool.")
   timezone                String   @default("Asia/Kuala_Lumpur")
   contactEmail            String?
   createdAt               DateTime @default(now())

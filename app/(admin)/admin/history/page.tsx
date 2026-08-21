@@ -1,7 +1,6 @@
 import { AdminShell } from "@/components/admin/AdminShell";
+import { getAdminHistoryPage } from "@/lib/admin/reports";
 import { requireAdminPage } from "@/lib/admin-page";
-import { prisma } from "@/lib/db";
-import { getSiteSettings } from "@/lib/public-data";
 import { formatInTimeZone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
@@ -16,19 +15,7 @@ export default async function AdminHistoryPage({ searchParams }: HistoryPageProp
   const page = Math.max(Number(params.page ?? "1"), 1);
   const winnerValue = Number(params.winner ?? "");
   const winner = Number.isInteger(winnerValue) ? winnerValue : undefined;
-  const take = 25;
-  const settings = await getSiteSettings();
-
-  const where = winner === undefined ? {} : { winningNumber: winner };
-  const [items, total] = await Promise.all([
-    prisma.spinResult.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * take,
-      take
-    }),
-    prisma.spinResult.count({ where })
-  ]);
+  const history = await getAdminHistoryPage({ page, winner });
 
   return (
     <AdminShell title="Spin History">
@@ -43,7 +30,7 @@ export default async function AdminHistoryPage({ searchParams }: HistoryPageProp
           />
           <button className="gold-button focus-ring rounded-lg px-5 py-2 text-sm uppercase tracking-[0.14em]">Search</button>
         </form>
-        {items.length === 0 ? (
+        {history.items.length === 0 ? (
           <p className="text-[#aeb7ca]">No history found.</p>
         ) : (
           <div className="overflow-x-auto">
@@ -58,10 +45,10 @@ export default async function AdminHistoryPage({ searchParams }: HistoryPageProp
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10">
-                {items.map((item) => (
+                {history.items.map((item) => (
                   <tr key={item.id} className="text-white">
                     <td className="py-4 font-mono text-xs text-[#aeb7ca]">#{item.id.slice(0, 8).toUpperCase()}</td>
-                    <td>{formatInTimeZone(item.createdAt, settings.timezone)}</td>
+                    <td>{formatInTimeZone(item.createdAt, history.timezone)}</td>
                     <td>
                       {item.requestedMin}-{item.requestedMax}
                     </td>
@@ -74,7 +61,7 @@ export default async function AdminHistoryPage({ searchParams }: HistoryPageProp
           </div>
         )}
         <p className="mt-5 text-sm text-[#aeb7ca]">
-          Page {page} of {Math.max(Math.ceil(total / take), 1)}
+          Page {history.page} of {history.pageCount}
         </p>
       </div>
     </AdminShell>

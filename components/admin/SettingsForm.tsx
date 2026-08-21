@@ -23,6 +23,7 @@ type Settings = {
 export function SettingsForm({ settings }: { settings: Settings }) {
   const [form, setForm] = useState(settings);
   const [status, setStatus] = useState<string | null>(null);
+  const [statusTone, setStatusTone] = useState<"neutral" | "danger">("neutral");
   const [saving, setSaving] = useState(false);
 
   function update<K extends keyof Settings>(key: K, value: Settings[K]) {
@@ -40,6 +41,7 @@ export function SettingsForm({ settings }: { settings: Settings }) {
     });
     const data = (await response.json()) as { message?: string; error?: string };
     setSaving(false);
+    setStatusTone(response.ok ? "neutral" : "danger");
     setStatus(response.ok ? data.message ?? "Settings saved." : data.error ?? "Save failed.");
   }
 
@@ -102,7 +104,11 @@ export function SettingsForm({ settings }: { settings: Settings }) {
         ))}
       </div>
 
-      {status ? <p className="text-sm text-[#aeb7ca]">{status}</p> : null}
+      {status ? (
+        <p className={statusTone === "danger" ? "danger-banner rounded-lg px-4 py-3 text-sm font-semibold" : "text-sm text-[#aeb7ca]"}>
+          {status}
+        </p>
+      ) : null}
       <button className="gold-button focus-ring flex w-fit items-center gap-2 rounded-lg px-5 py-3 text-sm uppercase tracking-[0.16em]" disabled={saving}>
         <Save className="size-4" />
         {saving ? "Saving" : "Save Settings"}

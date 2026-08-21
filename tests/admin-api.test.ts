@@ -32,9 +32,9 @@ describe("admin APIs", () => {
     mocks.wheelUpsert.mockResolvedValue({ id: "wheel-1", minNumber: 1, maxNumber: 30, excludedNumbers: [7] });
     const settings = {
       id: "default",
-      siteName: "Lucky Spin",
-      headline: "SPIN YOUR LUCK",
-      subtitle: "Let the wheel choose.",
+      siteName: "RandomSpin",
+      headline: "RandomSpin",
+      subtitle: "Free random draws for names, numbers, and more.",
       announcement: null,
       soundEnabled: true,
       confettiEnabled: true,
@@ -43,7 +43,7 @@ describe("admin APIs", () => {
       defaultFrom: 1,
       defaultTo: 30,
       maximumAllowedRange: 1000,
-      publicDisclosureMessage: "Results are selected from the configured eligible number pool.",
+      publicDisclosureMessage: "Results are selected from the configured eligible pool.",
       timezone: "Asia/Kuala_Lumpur",
       contactEmail: null
     };
@@ -116,9 +116,9 @@ describe("admin APIs", () => {
     const { PUT } = await import("@/app/api/admin/settings/route");
     const response = await PUT(
       adminRequest("http://localhost:3000/api/admin/settings", {
-        siteName: "Lucky Spin",
-        headline: "SPIN YOUR LUCK",
-        subtitle: "Let the wheel choose.",
+        siteName: "RandomSpin",
+        headline: "RandomSpin",
+        subtitle: "Free random draws for names, numbers, and more.",
         announcement: null,
         soundEnabled: true,
         confettiEnabled: true,
@@ -127,7 +127,7 @@ describe("admin APIs", () => {
         defaultFrom: 1,
         defaultTo: 30,
         maximumAllowedRange: 1000,
-        publicDisclosureMessage: "Results are selected from the configured eligible number pool.",
+        publicDisclosureMessage: "Results are selected from the configured eligible pool.",
         timezone: "Asia/Kuala_Lumpur",
         contactEmail: null
       })
