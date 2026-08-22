@@ -11,7 +11,11 @@ import {
   PRIVATE_DRAW_OPERATOR_MODE,
   PRIVATE_DRAW_RANDOM_MODE,
   PrivateDrawNotFoundError,
+  PrivateDrawStateError,
+  archivePrivateDraw,
+  deletePrivateDrawPermanently,
   getPrivateDrawForAdmin,
+  restorePrivateDraw,
   updatePrivateDraw,
   type PrivateDrawMode
 } from "@/lib/private-draws";
@@ -37,6 +41,14 @@ const drawUpdateSchema = z.object({
   isActive: z.boolean(),
   nextWinner: z.coerce.number().int().nullable().optional(),
   action: z.enum(["set", "clear"]).optional()
+});
+
+const drawArchiveActionSchema = z.object({
+  action: z.enum(["archive", "restore"])
+});
+
+const deleteConfirmationSchema = z.object({
+  confirmation: z.literal("PERMANENTLY DELETE")
 });
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -103,5 +115,76 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
     console.error("Private draw admin error", error);
     return jsonError("Draw settings could not be saved.", 500);
+  }
+}
+
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    if (!requireSameOrigin(request)) {
+      return jsonError("Invalid request origin.", 403);
+    }
+
+    const admin = await getAdminFromRequest(request);
+    if (!admin) {
+      return jsonError("Unauthorized.", 401);
+    }
+
+    const parsed = drawArchiveActionSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) {
+      return jsonError("Invalid draw action.", 400);
+    }
+
+    const { id } = await params;
+    const draw = parsed.data.action === "archive" ? await archivePrivateDraw(id) : await restorePrivateDraw(id);
+
+    return NextResponse.json({
+      draw,
+      message: parsed.data.action === "archive" ? "Draw archived successfully." : "Draw restored successfully."
+    });
+  } catch (error) {
+    if (error instanceof PrivateDrawNotFoundError) {
+      return jsonError("Draw not found.", 404);
+    }
+
+    if (error instanceof PrivateDrawStateError || error instanceof SpinValidationError) {
+      return jsonError(error.message, 400);
+    }
+
+    console.error("Private draw archive action error", error);
+    return jsonError("Draw action could not be completed.", 500);
+  }
+}
+
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    if (!requireSameOrigin(request)) {
+      return jsonError("Invalid request origin.", 403);
+    }
+
+    const admin = await getAdminFromRequest(request);
+    if (!admin) {
+      return jsonError("Unauthorized.", 401);
+    }
+
+    const parsed = deleteConfirmationSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) {
+      return jsonError("Deletion confirmation is required.", 400);
+    }
+
+    const { id } = await params;
+    await deletePrivateDrawPermanently(id);
+
+    return NextResponse.json({ deletedId: id, message: "Draw permanently deleted." });
+  } catch (error) {
+    if (error instanceof PrivateDrawNotFoundError) {
+      return jsonError("Draw not found.", 404);
+    }
+
+    if (error instanceof PrivateDrawStateError || error instanceof SpinValidationError) {
+      return jsonError(error.message, 400);
+    }
+
+    console.error("Private draw delete error", error);
+    return jsonError("Draw could not be permanently deleted.", 500);
   }
 }

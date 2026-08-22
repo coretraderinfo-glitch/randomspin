@@ -57,12 +57,14 @@ model PrivateDraw {
   displayStyle          String                  @default("WHEEL")
   pendingOperatorWinner Int?
   isActive              Boolean                 @default(true)
+  archivedAt            DateTime?
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt
   spinResults           PrivateDrawSpinResult[]
 
   @@index([publicCode])
   @@index([isActive])
+  @@index([archivedAt])
 }
 
 model SpinResult {
@@ -109,6 +111,7 @@ model PlayerDraw {
   pendingOperatorParticipantId String?
   pendingOperatorParticipant   PlayerParticipant?  @relation("PendingOperatorParticipant", fields: [pendingOperatorParticipantId], references: [id], onDelete: SetNull)
   isActive                     Boolean             @default(true)
+  archivedAt                   DateTime?
   removeWinnerAfterWin         Boolean             @default(false)
   showParticipantList          Boolean             @default(true)
   showReferencesPublicly       Boolean             @default(true)
@@ -119,6 +122,7 @@ model PlayerDraw {
 
   @@index([publicCode])
   @@index([isActive])
+  @@index([archivedAt])
   @@index([pendingOperatorParticipantId])
 }
 

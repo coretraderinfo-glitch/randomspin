@@ -19,6 +19,7 @@ const privateDraw = {
   displayStyle: "WHEEL" as const,
   pendingOperatorWinner: null,
   isActive: true,
+  archivedAt: null,
   completedSpins: 0,
   createdAt: "2026-08-22T08:00:00.000Z",
   updatedAt: "2026-08-22T08:00:00.000Z"
@@ -30,6 +31,7 @@ const playerDraw = {
   name: "Player Draw",
   mode: "RANDOM" as const,
   isActive: true,
+  archivedAt: null,
   removeWinnerAfterWin: false,
   showParticipantList: true,
   participantCount: 2,
@@ -152,6 +154,76 @@ describe("admin feedback banners", () => {
     expect(container.querySelector(".success-banner")?.textContent).toBe("Private draw created successfully.");
   });
 
+  it("archives, restores, and permanently deletes private draws from the correct tabs", async () => {
+    const inactiveDraw = { ...privateDraw, isActive: false };
+    const archivedDraw = { ...inactiveDraw, archivedAt: "2026-08-22T09:00:00.000Z" };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ draw: archivedDraw, message: "" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ draw: inactiveDraw, message: "" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ draw: archivedDraw, message: "" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ deletedId: inactiveDraw.id, message: "" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<PrivateDrawManager initialDraws={[inactiveDraw]} />);
+
+    expect(screen.getByText("Current 1 · Archived 0")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "ARCHIVE" }));
+
+    await waitFor(() => expect(screen.getByText("Draw archived successfully.")).toBeInTheDocument());
+    expect(screen.getByText("Current 0 · Archived 1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "DELETE PERMANENTLY" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
+    expect(screen.getByText("Archived")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "RESTORE" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "DELETE PERMANENTLY" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "RESTORE" }));
+    await waitFor(() => expect(screen.getByText("Draw restored successfully.")).toBeInTheDocument());
+    expect(screen.getByText("No archived private draws.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Current (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "ARCHIVE" }));
+    await waitFor(() => expect(screen.getByText("Draw archived successfully.")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "DELETE PERMANENTLY" }));
+
+    await waitFor(() => expect(screen.getByText("Draw permanently deleted.")).toBeInTheDocument());
+    expect(window.confirm).toHaveBeenCalledWith(
+      "Permanently delete this draw?\n\nThis will permanently remove the draw and its related history/results. This cannot be undone."
+    );
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/admin/draws/draw-1",
+      expect.objectContaining({
+        method: "DELETE",
+        body: JSON.stringify({ confirmation: "PERMANENTLY DELETE" })
+      })
+    );
+    expect(screen.getByText("No archived private draws.")).toBeInTheDocument();
+  });
+
   it("player draw settings use a readable fallback instead of an empty success banner", async () => {
     vi.stubGlobal(
       "fetch",
@@ -261,6 +333,48 @@ describe("admin feedback banners", () => {
     await waitFor(() => expect(screen.getByText("Player draw deactivated successfully.")).toBeInTheDocument());
     expect(screen.getByRole("button", { name: "ACTIVATE" })).toBeInTheDocument();
     expect(screen.getByText("Inactive")).toBeInTheDocument();
+  });
+
+  it("archives and deletes player draws only from the archived tab", async () => {
+    const inactiveDraw = { ...playerDraw, isActive: false };
+    const archivedDraw = { ...inactiveDraw, archivedAt: "2026-08-22T09:00:00.000Z" };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ draw: archivedDraw, message: "" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ deletedId: inactiveDraw.id, message: "" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<PlayerDrawManager initialDraws={[inactiveDraw]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "ARCHIVE" }));
+
+    await waitFor(() => expect(screen.getByText("Player draw archived successfully.")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "DELETE PERMANENTLY" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
+    expect(screen.getByText("Archived")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "DELETE PERMANENTLY" }));
+
+    await waitFor(() => expect(screen.getByText("Player draw permanently deleted.")).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/admin/player-draws/player-draw-1",
+      expect.objectContaining({
+        method: "DELETE",
+        body: JSON.stringify({ confirmation: "PERMANENTLY DELETE" })
+      })
+    );
+    expect(screen.getByText("No archived player draws.")).toBeInTheDocument();
   });
 
   it("auto-dismisses success feedback without clearing errors", async () => {

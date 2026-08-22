@@ -15,6 +15,7 @@ type DrawItem = {
   displayStyle: "WHEEL" | "NUMBER_ROLLER" | "SLOT_NUMBER" | "CARD_REVEAL";
   pendingOperatorWinner: number | null;
   isActive: boolean;
+  archivedAt: Date | string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
   completedSpins: number;
@@ -24,6 +25,7 @@ type DrawResponse = {
   message?: string;
   error?: string;
   draw?: DrawItem;
+  deletedId?: string;
 };
 
 function formatDate(value: Date | string) {
@@ -39,6 +41,7 @@ export function PrivateDrawManager({ initialDraws }: { initialDraws: DrawItem[] 
   const [displayStyle, setDisplayStyle] = useState<"WHEEL" | "NUMBER_ROLLER">("WHEEL");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<"current" | "archived">("current");
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
@@ -122,6 +125,68 @@ export function PrivateDrawManager({ initialDraws }: { initialDraws: DrawItem[] 
     setMessage(draw.isActive ? "Draw deactivated successfully." : "Draw activated successfully.");
   }
 
+  async function changeArchiveState(draw: DrawItem, action: "archive" | "restore") {
+    setBusyId(draw.id);
+    setBusyLabel(action === "archive" ? "Archiving..." : "Restoring...");
+    setMessage(null);
+    setError(null);
+
+    const response = await fetch(`/api/admin/draws/${draw.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action })
+    });
+    const data = (await response.json()) as DrawResponse;
+
+    setBusyId(null);
+    setBusyLabel(null);
+
+    if (!response.ok || !data.draw) {
+      setError(data.error ?? "Draw action could not be completed.");
+      return;
+    }
+
+    setDraws((current) => current.map((item) => (item.id === draw.id ? { ...item, ...data.draw! } : item)));
+    setMessage(normalizeFeedbackMessage(data.message, action === "archive" ? "Draw archived successfully." : "Draw restored successfully."));
+  }
+
+  async function deletePermanently(draw: DrawItem) {
+    const confirmed = window.confirm(
+      "Permanently delete this draw?\n\nThis will permanently remove the draw and its related history/results. This cannot be undone."
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setBusyId(draw.id);
+    setBusyLabel("Deleting...");
+    setMessage(null);
+    setError(null);
+
+    const response = await fetch(`/api/admin/draws/${draw.id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmation: "PERMANENTLY DELETE" })
+    });
+    const data = (await response.json()) as DrawResponse;
+
+    setBusyId(null);
+    setBusyLabel(null);
+
+    if (!response.ok) {
+      setError(data.error ?? "Draw could not be permanently deleted.");
+      return;
+    }
+
+    setDraws((current) => current.filter((item) => item.id !== draw.id));
+    setMessage(normalizeFeedbackMessage(data.message, "Draw permanently deleted."));
+  }
+
+  const currentDraws = draws.filter((draw) => !draw.archivedAt);
+  const archivedDraws = draws.filter((draw) => draw.archivedAt);
+  const visibleDraws = view === "archived" ? archivedDraws : currentDraws;
+
   return (
     <div className="grid gap-5">
       <section className="glass rounded-xl p-5">
@@ -199,14 +264,35 @@ export function PrivateDrawManager({ initialDraws }: { initialDraws: DrawItem[] 
 
       <section className="glass rounded-xl p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-[var(--font-display)] text-2xl font-black text-white">Private Draws</h2>
-          <p className="text-sm text-[#aeb7ca]">{draws.length} total</p>
+          <div>
+            <h2 className="font-[var(--font-display)] text-2xl font-black text-white">Private Draws</h2>
+            <p className="mt-1 text-sm text-[#aeb7ca]">
+              Current {currentDraws.length} · Archived {archivedDraws.length}
+            </p>
+          </div>
+          <div className="flex rounded-lg border border-white/10 bg-white/[0.04] p-1">
+            {[
+              { value: "current", label: `Current (${currentDraws.length})` },
+              { value: "archived", label: `Archived (${archivedDraws.length})` }
+            ].map((item) => (
+              <button
+                key={item.value}
+                className={`focus-ring rounded-md px-4 py-2 text-sm font-black ${
+                  view === item.value ? "bg-white/12 text-white" : "text-[#aeb7ca] hover:bg-white/[0.08]"
+                }`}
+                type="button"
+                onClick={() => setView(item.value as "current" | "archived")}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="grid gap-3">
-          {draws.length === 0 ? (
-            <p className="text-sm text-[#aeb7ca]">No private draws yet.</p>
+          {visibleDraws.length === 0 ? (
+            <p className="text-sm text-[#aeb7ca]">{view === "archived" ? "No archived private draws." : "No current private draws."}</p>
           ) : (
-            draws.map((draw) => (
+            visibleDraws.map((draw) => (
               <article key={draw.id} className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
                 <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
                   <div>
@@ -216,7 +302,7 @@ export function PrivateDrawManager({ initialDraws }: { initialDraws: DrawItem[] 
                         {draw.mode === "OPERATOR" ? "Operator" : "Random"}
                       </span>
                       <span className="rounded-full border border-white/12 bg-white/[0.06] px-2 py-1 text-[0.65rem] font-black uppercase tracking-[0.16em] text-[#dfe6f6]">
-                        {draw.isActive ? "Active" : "Inactive"}
+                        {draw.archivedAt ? "Archived" : draw.isActive ? "Active" : "Inactive"}
                       </span>
                       <span className="rounded-full border border-white/12 bg-white/[0.06] px-2 py-1 text-[0.65rem] font-black uppercase tracking-[0.16em] text-[#dfe6f6]">
                         Default {draw.displayStyle === "NUMBER_ROLLER" ? "Number" : "Wheel"}
@@ -229,45 +315,83 @@ export function PrivateDrawManager({ initialDraws }: { initialDraws: DrawItem[] 
                     <p className="mt-1 text-sm text-[#aeb7ca]">
                       Created {formatDate(draw.createdAt)} · Updated {formatDate(draw.updatedAt)}
                     </p>
+                    {draw.archivedAt ? <p className="mt-1 text-sm text-[#aeb7ca]">Archived {formatDate(draw.archivedAt)}</p> : null}
                   </div>
                   <div className="flex flex-wrap gap-2 lg:justify-end">
-                    <a
-                      className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-bold text-white hover:bg-white/12"
-                      href={`/admin/draws/${draw.id}`}
-                    >
-                      OPEN
-                    </a>
-                    <a
-                      className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-bold text-white hover:bg-white/12"
-                      href={`/admin/draws/${draw.id}`}
-                    >
-                      EDIT
-                    </a>
-                    <button
-                      className="focus-ring grid size-11 place-items-center rounded-lg border border-white/12 bg-white/8 text-white hover:bg-white/12"
-                      type="button"
-                      aria-label={`Copy ${draw.name} audience link`}
-                      onClick={() => copyLink(draw.publicCode)}
-                    >
-                      <Copy className="size-4" />
-                    </button>
-                    <a
-                      className="focus-ring grid size-11 place-items-center rounded-lg border border-white/12 bg-white/8 text-white hover:bg-white/12"
-                      href={`/draw/${draw.publicCode}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      aria-label={`Open ${draw.name} audience view`}
-                    >
-                      <ExternalLink className="size-4" />
-                    </a>
-                    <button
-                      className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-bold text-white hover:bg-white/12 disabled:opacity-60"
-                      type="button"
-                      disabled={busyId === draw.id}
-                      onClick={() => toggleActive(draw)}
-                    >
-                      {busyId === draw.id ? busyLabel : draw.isActive ? "DEACTIVATE" : "ACTIVATE"}
-                    </button>
+                    {draw.archivedAt ? (
+                      <>
+                        <button
+                          className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-bold text-white hover:bg-white/12 disabled:opacity-60"
+                          type="button"
+                          disabled={busyId === draw.id}
+                          onClick={() => changeArchiveState(draw, "restore")}
+                        >
+                          {busyId === draw.id ? busyLabel : "RESTORE"}
+                        </button>
+                        <button
+                          className="danger-control focus-ring rounded-lg border px-4 py-3 text-sm font-bold disabled:opacity-60"
+                          type="button"
+                          disabled={busyId === draw.id}
+                          onClick={() => deletePermanently(draw)}
+                        >
+                          {busyId === draw.id ? busyLabel : "DELETE PERMANENTLY"}
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <a
+                          className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-bold text-white hover:bg-white/12"
+                          href={`/admin/draws/${draw.id}`}
+                        >
+                          OPEN
+                        </a>
+                        <a
+                          className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-bold text-white hover:bg-white/12"
+                          href={`/admin/draws/${draw.id}`}
+                        >
+                          EDIT
+                        </a>
+                        {draw.isActive ? (
+                          <>
+                            <button
+                              className="focus-ring grid size-11 place-items-center rounded-lg border border-white/12 bg-white/8 text-white hover:bg-white/12"
+                              type="button"
+                              aria-label={`Copy ${draw.name} audience link`}
+                              onClick={() => copyLink(draw.publicCode)}
+                            >
+                              <Copy className="size-4" />
+                            </button>
+                            <a
+                              className="focus-ring grid size-11 place-items-center rounded-lg border border-white/12 bg-white/8 text-white hover:bg-white/12"
+                              href={`/draw/${draw.publicCode}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              aria-label={`Open ${draw.name} audience view`}
+                            >
+                              <ExternalLink className="size-4" />
+                            </a>
+                          </>
+                        ) : null}
+                        <button
+                          className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-bold text-white hover:bg-white/12 disabled:opacity-60"
+                          type="button"
+                          disabled={busyId === draw.id}
+                          onClick={() => toggleActive(draw)}
+                        >
+                          {busyId === draw.id ? busyLabel : draw.isActive ? "DEACTIVATE" : "ACTIVATE"}
+                        </button>
+                        {!draw.isActive ? (
+                          <button
+                            className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-bold text-white hover:bg-white/12 disabled:opacity-60"
+                            type="button"
+                            disabled={busyId === draw.id}
+                            onClick={() => changeArchiveState(draw, "archive")}
+                          >
+                            {busyId === draw.id ? busyLabel : "ARCHIVE"}
+                          </button>
+                        ) : null}
+                      </>
+                    )}
                   </div>
                 </div>
               </article>

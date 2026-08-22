@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   playerDrawCreate: vi.fn(),
   playerDrawUpdate: vi.fn(),
   playerDrawUpdateMany: vi.fn(),
+  playerDrawDelete: vi.fn(),
   playerParticipantFindMany: vi.fn(),
   playerParticipantFindFirst: vi.fn(),
   playerParticipantCount: vi.fn(),
@@ -28,7 +29,8 @@ vi.mock("@/lib/db", () => ({
       findUnique: mocks.playerDrawFindUnique,
       create: mocks.playerDrawCreate,
       update: mocks.playerDrawUpdate,
-      updateMany: mocks.playerDrawUpdateMany
+      updateMany: mocks.playerDrawUpdateMany,
+      delete: mocks.playerDrawDelete
     },
     playerParticipant: {
       findMany: mocks.playerParticipantFindMany,
@@ -80,6 +82,7 @@ const baseDraw = {
   mode: "OPERATOR",
   pendingOperatorParticipantId: "participant-sarah",
   isActive: true,
+  archivedAt: null,
   removeWinnerAfterWin: false,
   showParticipantList: true,
   showReferencesPublicly: true,
@@ -139,6 +142,7 @@ describe("RandomSpin Player Draw APIs", () => {
     }));
     mocks.playerDrawUpdate.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ ...baseDraw, ...data }));
     mocks.playerDrawUpdateMany.mockResolvedValue({ count: 1 });
+    mocks.playerDrawDelete.mockResolvedValue(baseDraw);
     mocks.playerParticipantFindMany.mockResolvedValue(participants.filter((participant) => participant.isEligible));
     mocks.playerParticipantFindFirst.mockImplementation(async ({ where }: { where: { id: string; isEligible?: boolean } }) => {
       const participant = participants.find((item) => item.id === where.id);
@@ -159,7 +163,8 @@ describe("RandomSpin Player Draw APIs", () => {
           findUnique: mocks.playerDrawFindUnique,
           create: mocks.playerDrawCreate,
           update: mocks.playerDrawUpdate,
-          updateMany: mocks.playerDrawUpdateMany
+          updateMany: mocks.playerDrawUpdateMany,
+          delete: mocks.playerDrawDelete
         },
         playerParticipant: {
           findMany: mocks.playerParticipantFindMany,
@@ -278,6 +283,78 @@ describe("RandomSpin Player Draw APIs", () => {
       where: { id: "player-draw-1", pendingOperatorParticipantId: "participant-sarah" },
       data: { pendingOperatorParticipantId: null }
     });
+  });
+
+  it("archived player audience draw cannot be used normally", async () => {
+    const { POST } = await import("@/app/api/player-draw/[publicCode]/spin/route");
+    mocks.playerDrawFindUnique.mockResolvedValue({ ...baseDraw, isActive: false, archivedAt: new Date("2026-08-22T00:00:00.000Z") });
+
+    const response = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "PLAYTEST" }) });
+
+    expect(response.status).toBe(404);
+    expect(mocks.playerDrawResultCreate).not.toHaveBeenCalled();
+  });
+
+  it("inactive player draw can be archived", async () => {
+    const archivedAt = new Date("2026-08-22T00:00:00.000Z");
+    mocks.playerDrawFindUnique.mockResolvedValue({ ...baseDraw, isActive: false });
+    mocks.playerDrawUpdate.mockResolvedValue({ ...baseDraw, isActive: false, pendingOperatorParticipantId: null, archivedAt });
+    const { PATCH } = await import("@/app/api/admin/player-draws/[id]/route");
+    const response = await PATCH(
+      new NextRequest("http://localhost:3000/api/admin/player-draws/player-draw-1", {
+        method: "PATCH",
+        body: JSON.stringify({ action: "archive" }),
+        headers: { "content-type": "application/json", origin: "http://localhost:3000" }
+      }),
+      { params: Promise.resolve({ id: "player-draw-1" }) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.message).toBe("Player draw archived successfully.");
+    expect(mocks.playerDrawUpdate).toHaveBeenCalledWith({
+      where: { id: "player-draw-1" },
+      data: expect.objectContaining({ isActive: false, pendingOperatorParticipantId: null, archivedAt: expect.any(Date) })
+    });
+  });
+
+  it("archived player draw can be restored", async () => {
+    mocks.playerDrawFindUnique.mockResolvedValue({ ...baseDraw, isActive: false, archivedAt: new Date("2026-08-22T00:00:00.000Z") });
+    mocks.playerDrawUpdate.mockResolvedValue({ ...baseDraw, isActive: false, archivedAt: null });
+    const { PATCH } = await import("@/app/api/admin/player-draws/[id]/route");
+    const response = await PATCH(
+      new NextRequest("http://localhost:3000/api/admin/player-draws/player-draw-1", {
+        method: "PATCH",
+        body: JSON.stringify({ action: "restore" }),
+        headers: { "content-type": "application/json", origin: "http://localhost:3000" }
+      }),
+      { params: Promise.resolve({ id: "player-draw-1" }) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.message).toBe("Player draw restored successfully.");
+    expect(body.draw.archivedAt).toBeNull();
+    expect(body.draw.isActive).toBe(false);
+  });
+
+  it("archived player draw can be permanently deleted without touching another draw", async () => {
+    mocks.playerDrawFindUnique.mockResolvedValue({ ...baseDraw, archivedAt: new Date("2026-08-22T00:00:00.000Z") });
+    const { DELETE } = await import("@/app/api/admin/player-draws/[id]/route");
+    const response = await DELETE(
+      new NextRequest("http://localhost:3000/api/admin/player-draws/player-draw-1", {
+        method: "DELETE",
+        body: JSON.stringify({ confirmation: "PERMANENTLY DELETE" }),
+        headers: { "content-type": "application/json", origin: "http://localhost:3000" }
+      }),
+      { params: Promise.resolve({ id: "player-draw-1" }) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ deletedId: "player-draw-1", message: "Player draw permanently deleted." });
+    expect(mocks.playerDrawDelete).toHaveBeenCalledWith({ where: { id: "player-draw-1" } });
+    expect(mocks.playerDrawDelete).not.toHaveBeenCalledWith({ where: { id: "player-draw-2" } });
   });
 
   it("concurrency consumes a pending operator participant only once", async () => {

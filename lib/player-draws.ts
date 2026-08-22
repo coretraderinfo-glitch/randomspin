@@ -43,6 +43,13 @@ export class PlayerDrawNotFoundError extends Error {
   }
 }
 
+export class PlayerDrawStateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PlayerDrawStateError";
+  }
+}
+
 const publicCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 function sanitizeText(value: unknown, maxLength: number) {
@@ -272,6 +279,7 @@ export async function listPlayerDraws() {
     mode: normalizeDrawMode(draw.mode),
     pendingOperatorParticipantId: draw.pendingOperatorParticipantId,
     isActive: draw.isActive,
+    archivedAt: draw.archivedAt,
     removeWinnerAfterWin: draw.removeWinnerAfterWin,
     showParticipantList: draw.showParticipantList,
     showReferencesPublicly: draw.showReferencesPublicly,
@@ -291,7 +299,7 @@ export async function getPlayerDrawAudience(publicCode: string) {
     }
   });
 
-  if (!draw || !draw.isActive) {
+  if (!draw || !draw.isActive || draw.archivedAt) {
     return null;
   }
 
@@ -337,6 +345,7 @@ export async function getPlayerDrawForAdmin(id: string) {
     mode: normalizeDrawMode(draw.mode),
     pendingOperatorParticipantId: draw.pendingOperatorParticipantId,
     isActive: draw.isActive,
+    archivedAt: draw.archivedAt,
     removeWinnerAfterWin: draw.removeWinnerAfterWin,
     showParticipantList: draw.showParticipantList,
     showReferencesPublicly: draw.showReferencesPublicly,
@@ -496,7 +505,7 @@ export async function createPrivatePlayerDrawSpin({
   return prisma.$transaction(async (tx) => {
     const draw = await tx.playerDraw.findUnique({ where: { publicCode } });
 
-    if (!draw || !draw.isActive) {
+    if (!draw || !draw.isActive || draw.archivedAt) {
       throw new PlayerDrawNotFoundError();
     }
 
@@ -572,4 +581,65 @@ export async function createPrivatePlayerDrawSpin({
       mode
     };
   });
+}
+
+export async function archivePlayerDraw(id: string) {
+  const draw = await prisma.playerDraw.findUnique({ where: { id } });
+
+  if (!draw) {
+    throw new PlayerDrawNotFoundError();
+  }
+
+  if (draw.archivedAt) {
+    return draw;
+  }
+
+  if (draw.isActive) {
+    throw new PlayerDrawStateError("Deactivate the player draw before archiving it.");
+  }
+
+  return prisma.playerDraw.update({
+    where: { id },
+    data: {
+      archivedAt: new Date(),
+      isActive: false,
+      pendingOperatorParticipantId: null
+    }
+  });
+}
+
+export async function restorePlayerDraw(id: string) {
+  const draw = await prisma.playerDraw.findUnique({ where: { id } });
+
+  if (!draw) {
+    throw new PlayerDrawNotFoundError();
+  }
+
+  if (!draw.archivedAt) {
+    return draw;
+  }
+
+  return prisma.playerDraw.update({
+    where: { id },
+    data: {
+      archivedAt: null,
+      isActive: false
+    }
+  });
+}
+
+export async function deletePlayerDrawPermanently(id: string) {
+  const draw = await prisma.playerDraw.findUnique({ where: { id } });
+
+  if (!draw) {
+    throw new PlayerDrawNotFoundError();
+  }
+
+  if (!draw.archivedAt) {
+    throw new PlayerDrawStateError("Archive the player draw before permanently deleting it.");
+  }
+
+  await prisma.playerDraw.delete({ where: { id } });
+
+  return { id };
 }

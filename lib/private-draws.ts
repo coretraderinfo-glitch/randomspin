@@ -23,6 +23,7 @@ export type PrivateDrawRecord = {
   displayStyle?: string | null;
   pendingOperatorWinner: number | null;
   isActive: boolean;
+  archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -54,6 +55,13 @@ export class PrivateDrawNotFoundError extends Error {
   constructor() {
     super("Private draw not found.");
     this.name = "PrivateDrawNotFoundError";
+  }
+}
+
+export class PrivateDrawStateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PrivateDrawStateError";
   }
 }
 
@@ -169,7 +177,7 @@ export async function listPrivateDraws(): Promise<PrivateDrawListItem[]> {
 export async function getPrivateDrawAudience(publicCode: string) {
   const draw = await prisma.privateDraw.findUnique({ where: { publicCode } });
 
-  if (!draw || !draw.isActive) {
+  if (!draw || !draw.isActive || draw.archivedAt) {
     return null;
   }
 
@@ -239,6 +247,7 @@ export async function createPrivateDraw(input: PrivateDrawMutationInput) {
     displayStyle,
     pendingOperatorWinner: null,
     isActive: input.isActive,
+    archivedAt: null,
     createdAt: new Date(),
     updatedAt: new Date()
   });
@@ -259,6 +268,7 @@ export async function createPrivateDraw(input: PrivateDrawMutationInput) {
           mode: input.mode,
           displayStyle,
           isActive: input.isActive,
+          archivedAt: null,
           pendingOperatorWinner
         }
       });
@@ -353,7 +363,7 @@ export async function createPrivateDrawSpin({
   return prisma.$transaction(async (tx) => {
     const draw = await tx.privateDraw.findUnique({ where: { publicCode } });
 
-    if (!draw || !draw.isActive) {
+    if (!draw || !draw.isActive || draw.archivedAt) {
       throw new PrivateDrawNotFoundError();
     }
 
@@ -442,4 +452,69 @@ export async function createPrivateDrawSpin({
       nextLabel: getPrivateDrawAudienceLabel(normalized.mode, null)
     };
   });
+}
+
+export async function archivePrivateDraw(id: string) {
+  const draw = await prisma.privateDraw.findUnique({ where: { id } });
+
+  if (!draw) {
+    throw new PrivateDrawNotFoundError();
+  }
+
+  if (draw.archivedAt) {
+    return normalizePrivateDraw(draw);
+  }
+
+  if (draw.isActive) {
+    throw new PrivateDrawStateError("Deactivate the draw before archiving it.");
+  }
+
+  const archived = await prisma.privateDraw.update({
+    where: { id },
+    data: {
+      archivedAt: new Date(),
+      isActive: false,
+      pendingOperatorWinner: null
+    }
+  });
+
+  return normalizePrivateDraw(archived);
+}
+
+export async function restorePrivateDraw(id: string) {
+  const draw = await prisma.privateDraw.findUnique({ where: { id } });
+
+  if (!draw) {
+    throw new PrivateDrawNotFoundError();
+  }
+
+  if (!draw.archivedAt) {
+    return normalizePrivateDraw(draw);
+  }
+
+  const restored = await prisma.privateDraw.update({
+    where: { id },
+    data: {
+      archivedAt: null,
+      isActive: false
+    }
+  });
+
+  return normalizePrivateDraw(restored);
+}
+
+export async function deletePrivateDrawPermanently(id: string) {
+  const draw = await prisma.privateDraw.findUnique({ where: { id } });
+
+  if (!draw) {
+    throw new PrivateDrawNotFoundError();
+  }
+
+  if (!draw.archivedAt) {
+    throw new PrivateDrawStateError("Archive the draw before permanently deleting it.");
+  }
+
+  await prisma.privateDraw.delete({ where: { id } });
+
+  return { id };
 }

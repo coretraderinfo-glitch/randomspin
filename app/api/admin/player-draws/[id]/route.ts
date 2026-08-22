@@ -5,7 +5,11 @@ import {
   PLAYER_DRAW_OPERATOR_MODE,
   PLAYER_DRAW_RANDOM_MODE,
   PlayerDrawNotFoundError,
+  PlayerDrawStateError,
+  archivePlayerDraw,
+  deletePlayerDrawPermanently,
   getPlayerDrawForAdmin,
+  restorePlayerDraw,
   updatePlayerDraw,
   type PlayerDrawMode
 } from "@/lib/player-draws";
@@ -32,6 +36,14 @@ const playerDrawSchema = z.object({
   participants: z.array(participantSchema).max(1000).optional(),
   nextWinnerParticipantId: z.string().max(80).nullable().optional(),
   action: z.enum(["set", "clear", "save"]).optional()
+});
+
+const playerDrawArchiveActionSchema = z.object({
+  action: z.enum(["archive", "restore"])
+});
+
+const deleteConfirmationSchema = z.object({
+  confirmation: z.literal("PERMANENTLY DELETE")
 });
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -87,5 +99,76 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
     console.error("Player draw admin error", error);
     return jsonError("Player draw settings could not be saved.", 500);
+  }
+}
+
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    if (!requireSameOrigin(request)) {
+      return jsonError("Invalid request origin.", 403);
+    }
+
+    const admin = await getAdminFromRequest(request);
+    if (!admin) {
+      return jsonError("Unauthorized.", 401);
+    }
+
+    const parsed = playerDrawArchiveActionSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) {
+      return jsonError("Invalid player draw action.", 400);
+    }
+
+    const { id } = await params;
+    const draw = parsed.data.action === "archive" ? await archivePlayerDraw(id) : await restorePlayerDraw(id);
+
+    return NextResponse.json({
+      draw,
+      message: parsed.data.action === "archive" ? "Player draw archived successfully." : "Player draw restored successfully."
+    });
+  } catch (error) {
+    if (error instanceof PlayerDrawNotFoundError) {
+      return jsonError("Player draw not found.", 404);
+    }
+
+    if (error instanceof PlayerDrawStateError || error instanceof SpinValidationError) {
+      return jsonError(error.message, 400);
+    }
+
+    console.error("Player draw archive action error", error);
+    return jsonError("Player draw action could not be completed.", 500);
+  }
+}
+
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    if (!requireSameOrigin(request)) {
+      return jsonError("Invalid request origin.", 403);
+    }
+
+    const admin = await getAdminFromRequest(request);
+    if (!admin) {
+      return jsonError("Unauthorized.", 401);
+    }
+
+    const parsed = deleteConfirmationSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) {
+      return jsonError("Deletion confirmation is required.", 400);
+    }
+
+    const { id } = await params;
+    await deletePlayerDrawPermanently(id);
+
+    return NextResponse.json({ deletedId: id, message: "Player draw permanently deleted." });
+  } catch (error) {
+    if (error instanceof PlayerDrawNotFoundError) {
+      return jsonError("Player draw not found.", 404);
+    }
+
+    if (error instanceof PlayerDrawStateError || error instanceof SpinValidationError) {
+      return jsonError(error.message, 400);
+    }
+
+    console.error("Player draw delete error", error);
+    return jsonError("Player draw could not be permanently deleted.", 500);
   }
 }

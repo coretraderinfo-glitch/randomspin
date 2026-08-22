@@ -14,6 +14,7 @@ export default async function AdminPlayerDrawsPage() {
       <PlayerDrawManager
         initialDraws={draws.map((draw) => ({
           ...draw,
+          archivedAt: draw.archivedAt?.toISOString() ?? null,
           createdAt: draw.createdAt.toISOString(),
           updatedAt: draw.updatedAt.toISOString()
         }))}

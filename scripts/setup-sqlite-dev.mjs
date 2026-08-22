@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS "PrivateDraw" (
   "displayStyle" TEXT NOT NULL DEFAULT 'WHEEL',
   "pendingOperatorWinner" INTEGER,
   "isActive" BOOLEAN NOT NULL DEFAULT true,
+  "archivedAt" DATETIME,
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -96,6 +97,7 @@ CREATE TABLE IF NOT EXISTS "PlayerDraw" (
   "mode" TEXT NOT NULL DEFAULT 'RANDOM',
   "pendingOperatorParticipantId" TEXT,
   "isActive" BOOLEAN NOT NULL DEFAULT true,
+  "archivedAt" DATETIME,
   "removeWinnerAfterWin" BOOLEAN NOT NULL DEFAULT false,
   "showParticipantList" BOOLEAN NOT NULL DEFAULT true,
   "showReferencesPublicly" BOOLEAN NOT NULL DEFAULT true,
@@ -192,6 +194,13 @@ function ensureColumn(table, column, definition) {
 }
 
 ensureColumn("PrivateDraw", "displayStyle", "TEXT NOT NULL DEFAULT 'WHEEL'");
+ensureColumn("PrivateDraw", "archivedAt", "DATETIME");
+ensureColumn("PlayerDraw", "archivedAt", "DATETIME");
+
+db.exec(`
+CREATE INDEX IF NOT EXISTS "PrivateDraw_archivedAt_idx" ON "PrivateDraw" ("archivedAt");
+CREATE INDEX IF NOT EXISTS "PlayerDraw_archivedAt_idx" ON "PlayerDraw" ("archivedAt");
+`);
 
 db.prepare(`
   INSERT OR IGNORE INTO "SiteSettings" (

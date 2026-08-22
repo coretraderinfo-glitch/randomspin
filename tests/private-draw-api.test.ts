@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   privateDrawCreate: vi.fn(),
   privateDrawUpdate: vi.fn(),
   privateDrawUpdateMany: vi.fn(),
+  privateDrawDelete: vi.fn(),
   privateDrawSpinCreate: vi.fn(),
   transaction: vi.fn()
 }));
@@ -23,7 +24,8 @@ vi.mock("@/lib/db", () => ({
       findUnique: mocks.privateDrawFindUnique,
       create: mocks.privateDrawCreate,
       update: mocks.privateDrawUpdate,
-      updateMany: mocks.privateDrawUpdateMany
+      updateMany: mocks.privateDrawUpdateMany,
+      delete: mocks.privateDrawDelete
     },
     privateDrawSpinResult: { create: mocks.privateDrawSpinCreate },
     $transaction: mocks.transaction
@@ -41,6 +43,7 @@ const baseDraw = {
   displayStyle: "WHEEL",
   pendingOperatorWinner: 7,
   isActive: true,
+  archivedAt: null,
   createdAt: new Date("2026-08-21T00:00:00.000Z"),
   updatedAt: new Date("2026-08-21T00:00:00.000Z")
 };
@@ -61,6 +64,7 @@ describe("private draw operator mode APIs", () => {
     }));
     mocks.privateDrawUpdate.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ ...baseDraw, ...data }));
     mocks.privateDrawUpdateMany.mockResolvedValue({ count: 1 });
+    mocks.privateDrawDelete.mockResolvedValue(baseDraw);
     mocks.privateDrawSpinCreate.mockResolvedValue({
       id: "draw-spin-1",
       winningNumber: 7,
@@ -229,6 +233,94 @@ describe("private draw operator mode APIs", () => {
 
     expect(response.status).toBe(404);
     expect(mocks.privateDrawSpinCreate).not.toHaveBeenCalled();
+  });
+
+  it("archived audience draw cannot be used normally", async () => {
+    const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
+    mocks.privateDrawFindUnique.mockResolvedValue({ ...baseDraw, isActive: false, archivedAt: new Date("2026-08-22T00:00:00.000Z") });
+
+    const response = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+
+    expect(response.status).toBe(404);
+    expect(mocks.privateDrawSpinCreate).not.toHaveBeenCalled();
+  });
+
+  it("active draw cannot be permanently deleted directly", async () => {
+    const { DELETE } = await import("@/app/api/admin/draws/[id]/route");
+    const response = await DELETE(
+      new NextRequest("http://localhost:3000/api/admin/draws/draw-1", {
+        method: "DELETE",
+        body: JSON.stringify({ confirmation: "PERMANENTLY DELETE" }),
+        headers: { "content-type": "application/json", origin: "http://localhost:3000" }
+      }),
+      { params: Promise.resolve({ id: "draw-1" }) }
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.privateDrawDelete).not.toHaveBeenCalled();
+  });
+
+  it("inactive draw can be archived", async () => {
+    const archivedAt = new Date("2026-08-22T00:00:00.000Z");
+    mocks.privateDrawFindUnique.mockResolvedValue({ ...baseDraw, isActive: false, pendingOperatorWinner: 7 });
+    mocks.privateDrawUpdate.mockResolvedValue({ ...baseDraw, isActive: false, pendingOperatorWinner: null, archivedAt });
+    const { PATCH } = await import("@/app/api/admin/draws/[id]/route");
+    const response = await PATCH(
+      new NextRequest("http://localhost:3000/api/admin/draws/draw-1", {
+        method: "PATCH",
+        body: JSON.stringify({ action: "archive" }),
+        headers: { "content-type": "application/json", origin: "http://localhost:3000" }
+      }),
+      { params: Promise.resolve({ id: "draw-1" }) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.message).toBe("Draw archived successfully.");
+    expect(body.draw.archivedAt).toBeTruthy();
+    expect(mocks.privateDrawUpdate).toHaveBeenCalledWith({
+      where: { id: "draw-1" },
+      data: expect.objectContaining({ isActive: false, pendingOperatorWinner: null, archivedAt: expect.any(Date) })
+    });
+  });
+
+  it("archived draw can be restored as inactive", async () => {
+    mocks.privateDrawFindUnique.mockResolvedValue({ ...baseDraw, isActive: false, archivedAt: new Date("2026-08-22T00:00:00.000Z") });
+    mocks.privateDrawUpdate.mockResolvedValue({ ...baseDraw, isActive: false, archivedAt: null });
+    const { PATCH } = await import("@/app/api/admin/draws/[id]/route");
+    const response = await PATCH(
+      new NextRequest("http://localhost:3000/api/admin/draws/draw-1", {
+        method: "PATCH",
+        body: JSON.stringify({ action: "restore" }),
+        headers: { "content-type": "application/json", origin: "http://localhost:3000" }
+      }),
+      { params: Promise.resolve({ id: "draw-1" }) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.message).toBe("Draw restored successfully.");
+    expect(body.draw.archivedAt).toBeNull();
+    expect(body.draw.isActive).toBe(false);
+  });
+
+  it("archived draw can be permanently deleted without touching another draw", async () => {
+    mocks.privateDrawFindUnique.mockResolvedValue({ ...baseDraw, archivedAt: new Date("2026-08-22T00:00:00.000Z") });
+    const { DELETE } = await import("@/app/api/admin/draws/[id]/route");
+    const response = await DELETE(
+      new NextRequest("http://localhost:3000/api/admin/draws/draw-1", {
+        method: "DELETE",
+        body: JSON.stringify({ confirmation: "PERMANENTLY DELETE" }),
+        headers: { "content-type": "application/json", origin: "http://localhost:3000" }
+      }),
+      { params: Promise.resolve({ id: "draw-1" }) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ deletedId: "draw-1", message: "Draw permanently deleted." });
+    expect(mocks.privateDrawDelete).toHaveBeenCalledWith({ where: { id: "draw-1" } });
+    expect(mocks.privateDrawDelete).not.toHaveBeenCalledWith({ where: { id: "draw-2" } });
   });
 
   it("operator private draw with no pending winner succeeds with secure random fallback", async () => {
