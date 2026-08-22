@@ -30,7 +30,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       winner: result.winner,
       timestamp: result.timestamp,
       from: result.from,
-      to: result.to
+      to: result.to,
+      mode: result.mode,
+      nextLabel: result.nextLabel
     });
   } catch (error) {
     if (error instanceof PrivateDrawNotFoundError) {

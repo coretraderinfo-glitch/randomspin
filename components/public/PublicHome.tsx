@@ -65,6 +65,8 @@ type SpinResponse = {
   timestamp: string;
   from?: number;
   to?: number;
+  mode?: "RANDOM" | "OPERATOR";
+  nextLabel?: string;
   error?: never;
 };
 
@@ -130,7 +132,9 @@ export function PublicHome({
   ]);
   const spinButtonLabel = hasCompletedSpin ? "SPIN AGAIN" : "SPIN";
   const spinEndpoint = drawMode.spinEndpoint ?? "/api/spin";
-  const drawModeLabel = drawMode.kind === "private" ? drawMode.label ?? "PRIVATE EVENT DRAW" : null;
+  const initialDrawModeLabel = drawMode.kind === "private" ? drawMode.label ?? "PRIVATE EVENT DRAW" : null;
+  const [liveDrawModeLabel, setLiveDrawModeLabel] = useState(initialDrawModeLabel);
+  const drawModeLabel = drawMode.kind === "private" ? liveDrawModeLabel : null;
   const configuredViewMode =
     drawMode.kind === "private" ? normalizePrivateDrawDisplayStyle(drawMode.displayStyle) : PRIVATE_DRAW_WHEEL_DISPLAY;
   const initialViewMode =
@@ -619,8 +623,18 @@ export function PublicHome({
 
       const resultFrom = data.from ?? from;
       const resultTo = data.to ?? to;
+      const effectiveFrom = drawMode.kind === "private" ? resultFrom : from;
+      const effectiveTo = drawMode.kind === "private" ? resultTo : to;
       const spinResult = { winner: data.winner, spinId: data.spinId, timestamp: data.timestamp, from: resultFrom, to: resultTo };
       setWinner(data.winner);
+      const completedRoundLabel = data.mode === "OPERATOR" ? "OPERATOR DRAW" : data.mode === "RANDOM" ? "RANDOM DRAW" : null;
+      if (drawMode.kind === "private") {
+        setFrom(resultFrom);
+        setTo(resultTo);
+        if (completedRoundLabel) {
+          setLiveDrawModeLabel(completedRoundLabel);
+        }
+      }
 
       const completeSpin = () => {
         setSpinning(false);
@@ -631,6 +645,9 @@ export function PublicHome({
           playWinnerSound();
           setResult(spinResult);
           setRecent((current) => [{ winner: data.winner, timestamp: data.timestamp }, ...current].slice(0, 10));
+          if (drawMode.kind === "private" && data.nextLabel) {
+            setLiveDrawModeLabel(data.nextLabel);
+          }
 
           if (settings.confettiEnabled && !prefersReducedMotion()) {
             setConfetti(true);
@@ -642,7 +659,7 @@ export function PublicHome({
       if (showNumberRoller) {
         finishNumberRoller(data.winner, completeSpin);
       } else {
-        const visualPlan = getWheelVisualPlan(from, to, data.winner);
+        const visualPlan = getWheelVisualPlan(effectiveFrom, effectiveTo, data.winner);
         finishWithServerWinner({
           winner: data.winner,
           renderedSegmentCount: visualPlan.renderedSegmentCount,

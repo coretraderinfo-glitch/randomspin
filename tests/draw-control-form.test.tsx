@@ -45,12 +45,15 @@ describe("private draw next round winner admin control", () => {
     render(<DrawControlForm draw={baseDraw} />);
 
     expect(screen.getByText("Next Round Winner")).toBeInTheDocument();
-    expect(screen.getByText("No next winner set")).toBeInTheDocument();
+    expect(screen.getByText("Next Winner: Not set")).toBeInTheDocument();
+    expect(screen.getByText("Next spin will be random.")).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("spinbutton", { name: "Next Confirmed Number" }), { target: { value: "20" } });
     fireEvent.click(screen.getByRole("button", { name: "SET NEXT WINNER" }));
 
-    await waitFor(() => expect(screen.getByText("Next winner set: 20")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Next winner set: 20.")).toBeInTheDocument());
+    expect(screen.getByText("Next Winner: Set")).toBeInTheDocument();
+    expect(screen.getByText("Next spin will use the confirmed number once. Confirmed number: 20")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       "/api/admin/draws/draw-1",
@@ -62,7 +65,8 @@ describe("private draw next round winner admin control", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "REFRESH STATUS" }));
 
-    await waitFor(() => expect(screen.getByText("No next winner set")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Next Winner: Not set")).toBeInTheDocument());
+    expect(screen.getByText("Next spin will be random.")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/draws/draw-1");
   });
 

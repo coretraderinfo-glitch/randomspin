@@ -231,6 +231,115 @@ describe("private draw operator mode APIs", () => {
     expect(mocks.privateDrawSpinCreate).not.toHaveBeenCalled();
   });
 
+  it("operator private draw with no pending winner succeeds with secure random fallback", async () => {
+    const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
+    mocks.privateDrawFindUnique.mockResolvedValue({
+      ...baseDraw,
+      mode: "OPERATOR",
+      pendingOperatorWinner: null,
+      excludedNumbers: [2, 3, 4, 5, 6, 7, 8, 9, 10]
+    });
+    mocks.privateDrawSpinCreate.mockImplementation(async ({ data }: { data: { winningNumber: number; mode: string } }) => ({
+      id: "draw-spin-random-fallback",
+      winningNumber: data.winningNumber,
+      createdAt: new Date("2026-08-21T01:02:03.000Z"),
+      mode: data.mode
+    }));
+
+    const response = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.winner).toBe(1);
+    expect(body.mode).toBe("RANDOM");
+    expect(body.nextLabel).toBe("RANDOM DRAW");
+    expect(mocks.privateDrawUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.privateDrawSpinCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ winningNumber: 1, mode: "RANDOM" })
+      })
+    );
+  });
+
+  it.each([3, 28, 66, 100])("private operator fallback accepts range 1-%i", async (maxNumber) => {
+    const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
+    mocks.privateDrawFindUnique.mockResolvedValue({
+      ...baseDraw,
+      minNumber: 1,
+      maxNumber,
+      mode: "OPERATOR",
+      pendingOperatorWinner: null,
+      excludedNumbers: Array.from({ length: maxNumber - 1 }, (_, index) => index + 2)
+    });
+    mocks.privateDrawSpinCreate.mockImplementation(async ({ data }: { data: { requestedMax: number; winningNumber: number; mode: string } }) => ({
+      id: `draw-spin-range-${data.requestedMax}`,
+      winningNumber: data.winningNumber,
+      createdAt: new Date("2026-08-21T01:02:03.000Z"),
+      mode: data.mode
+    }));
+
+    const response = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.from).toBe(1);
+    expect(body.to).toBe(maxNumber);
+    expect(body.winner).toBe(1);
+    expect(mocks.privateDrawSpinCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ requestedMin: 1, requestedMax: maxNumber, winningNumber: 1, mode: "RANDOM" })
+      })
+    );
+  });
+
+  it("private range changes 28 to 27 to 26 and later increases on the same public code", async () => {
+    const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
+    const liveRanges = [28, 27, 26, 66];
+    mocks.privateDrawFindUnique.mockImplementation(async () => {
+      const maxNumber = liveRanges.shift() ?? 66;
+      return {
+        ...baseDraw,
+        minNumber: 1,
+        maxNumber,
+        mode: "OPERATOR",
+        pendingOperatorWinner: null,
+        excludedNumbers: Array.from({ length: maxNumber - 1 }, (_, index) => index + 2)
+      };
+    });
+    mocks.privateDrawSpinCreate.mockImplementation(async ({ data }: { data: { requestedMax: number; winningNumber: number; mode: string } }) => ({
+      id: `draw-spin-live-${data.requestedMax}`,
+      winningNumber: data.winningNumber,
+      createdAt: new Date("2026-08-21T01:02:03.000Z"),
+      mode: data.mode
+    }));
+
+    const responses = await Promise.all([
+      POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) }),
+      POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) }),
+      POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) }),
+      POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) })
+    ]);
+    const bodies = await Promise.all(responses.map((response) => response.json()));
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200, 200, 200]);
+    expect(bodies.map((body) => body.to)).toEqual([28, 27, 26, 66]);
+    expect(bodies.every((body) => body.winner === 1)).toBe(true);
+    expect(mocks.privateDrawFindUnique).toHaveBeenCalledTimes(4);
+    expect(mocks.privateDrawSpinCreate).toHaveBeenCalledTimes(4);
+  });
+
+  it("private spin rejects an invalid stored FROM greater than TO range", async () => {
+    const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
+    mocks.privateDrawFindUnique.mockResolvedValue({ ...baseDraw, minNumber: 10, maxNumber: 1, mode: "OPERATOR", pendingOperatorWinner: null });
+
+    const response = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("FROM must be lower than TO.");
+    expect(mocks.privateDrawSpinCreate).not.toHaveBeenCalled();
+  });
+
   it("audience spin returns selected operator winner without exposing pending state", async () => {
     const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
     const response = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
@@ -242,11 +351,12 @@ describe("private draw operator mode APIs", () => {
       winner: 7,
       timestamp: "2026-08-21T01:02:03.000Z",
       from: 1,
-      to: 10
+      to: 10,
+      mode: "OPERATOR",
+      nextLabel: "RANDOM DRAW"
     });
     expect(JSON.stringify(body)).not.toContain("pendingOperatorWinner");
     expect(JSON.stringify(body)).not.toContain("excludedNumbers");
-    expect(JSON.stringify(body)).not.toContain("OPERATOR");
     expect(mocks.privateDrawUpdateMany).toHaveBeenCalledWith({
       where: { id: "draw-1", pendingOperatorWinner: 7 },
       data: { pendingOperatorWinner: null }
@@ -273,18 +383,139 @@ describe("private draw operator mode APIs", () => {
     expect(JSON.stringify(draw)).not.toContain("excludedNumbers");
   });
 
-  it("clears selected winner after one use and does not reuse it", async () => {
+  it("audience label is random when operator mode has no pending next winner", async () => {
+    const { getPrivateDrawAudience } = await import("@/lib/private-draws");
+    mocks.privateDrawFindUnique.mockResolvedValue({ ...baseDraw, pendingOperatorWinner: null });
+
+    const draw = await getPrivateDrawAudience("A7K29P");
+
+    expect(draw?.mode).toBe("OPERATOR");
+    expect(draw?.label).toBe("RANDOM DRAW");
+    expect(JSON.stringify(draw)).not.toContain("pendingOperatorWinner");
+  });
+
+  it("clears selected winner after one use and falls back to random on the next spin", async () => {
     const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
     mocks.privateDrawFindUnique
       .mockResolvedValueOnce(baseDraw)
-      .mockResolvedValueOnce({ ...baseDraw, pendingOperatorWinner: null });
+      .mockResolvedValueOnce({ ...baseDraw, pendingOperatorWinner: null, excludedNumbers: [2, 3, 4, 5, 6, 7, 8, 9, 10] });
+    mocks.privateDrawSpinCreate.mockImplementation(async ({ data }: { data: { winningNumber: number; mode: string } }) => ({
+      id: `draw-spin-${data.mode.toLowerCase()}`,
+      winningNumber: data.winningNumber,
+      createdAt: new Date("2026-08-21T01:02:03.000Z"),
+      mode: data.mode
+    }));
 
     const first = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
     const second = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const firstBody = await first.json();
+    const secondBody = await second.json();
 
     expect(first.status).toBe(200);
-    expect(second.status).toBe(400);
-    expect(mocks.privateDrawSpinCreate).toHaveBeenCalledTimes(1);
+    expect(second.status).toBe(200);
+    expect(firstBody.winner).toBe(7);
+    expect(secondBody.winner).toBe(1);
+    expect(mocks.privateDrawSpinCreate).toHaveBeenCalledTimes(2);
+    expect(mocks.privateDrawSpinCreate).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ data: expect.objectContaining({ winningNumber: 7, mode: "OPERATOR" }) })
+    );
+    expect(mocks.privateDrawSpinCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ data: expect.objectContaining({ winningNumber: 1, mode: "RANDOM" }) })
+    );
+  });
+
+  it("can use another pending winner after random fallback rounds", async () => {
+    const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
+    mocks.privateDrawFindUnique
+      .mockResolvedValueOnce(baseDraw)
+      .mockResolvedValueOnce({ ...baseDraw, pendingOperatorWinner: null, excludedNumbers: [2, 3, 4, 5, 6, 7, 8, 9, 10] })
+      .mockResolvedValueOnce({ ...baseDraw, pendingOperatorWinner: 5, excludedNumbers: [2, 4, 6, 8, 10] });
+    mocks.privateDrawSpinCreate.mockImplementation(async ({ data }: { data: { winningNumber: number; mode: string } }) => ({
+      id: `draw-spin-${data.winningNumber}`,
+      winningNumber: data.winningNumber,
+      createdAt: new Date("2026-08-21T01:02:03.000Z"),
+      mode: data.mode
+    }));
+
+    const first = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const second = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const third = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const firstBody = await first.json();
+    const secondBody = await second.json();
+    const thirdBody = await third.json();
+
+    expect(firstBody.winner).toBe(7);
+    expect(secondBody.winner).toBe(1);
+    expect(thirdBody.winner).toBe(5);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(third.status).toBe(200);
+    expect(mocks.privateDrawUpdateMany).toHaveBeenNthCalledWith(1, {
+      where: { id: "draw-1", pendingOperatorWinner: 7 },
+      data: { pendingOperatorWinner: null }
+    });
+    expect(mocks.privateDrawUpdateMany).toHaveBeenNthCalledWith(2, {
+      where: { id: "draw-1", pendingOperatorWinner: 5 },
+      data: { pendingOperatorWinner: null }
+    });
+  });
+
+  it("invalid pending winner after range reduction is cleared and falls back to random", async () => {
+    const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
+    mocks.privateDrawFindUnique.mockResolvedValue({
+      ...baseDraw,
+      minNumber: 1,
+      maxNumber: 5,
+      excludedNumbers: [2, 3, 4, 5],
+      pendingOperatorWinner: 9
+    });
+    mocks.privateDrawSpinCreate.mockImplementation(async ({ data }: { data: { winningNumber: number; mode: string } }) => ({
+      id: "draw-spin-invalid-fallback",
+      winningNumber: data.winningNumber,
+      createdAt: new Date("2026-08-21T01:02:03.000Z"),
+      mode: data.mode
+    }));
+
+    const response = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.winner).toBe(1);
+    expect(mocks.privateDrawUpdateMany).toHaveBeenCalledWith({
+      where: { id: "draw-1", pendingOperatorWinner: 9 },
+      data: { pendingOperatorWinner: null }
+    });
+    expect(mocks.privateDrawSpinCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ winningNumber: 1, mode: "RANDOM" }) })
+    );
+  });
+
+  it("excluded pending winner is cleared and cannot be used", async () => {
+    const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
+    mocks.privateDrawFindUnique.mockResolvedValue({
+      ...baseDraw,
+      excludedNumbers: [2, 3, 4, 5, 6, 7, 8, 9, 10],
+      pendingOperatorWinner: 7
+    });
+    mocks.privateDrawSpinCreate.mockImplementation(async ({ data }: { data: { winningNumber: number; mode: string } }) => ({
+      id: "draw-spin-excluded-fallback",
+      winningNumber: data.winningNumber,
+      createdAt: new Date("2026-08-21T01:02:03.000Z"),
+      mode: data.mode
+    }));
+
+    const response = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.winner).toBe(1);
+    expect(body.winner).not.toBe(7);
+    expect(mocks.privateDrawUpdateMany).toHaveBeenCalledWith({
+      where: { id: "draw-1", pendingOperatorWinner: 7 },
+      data: { pendingOperatorWinner: null }
+    });
   });
 
   it("concurrent requests cannot consume the same pending winner twice", async () => {

@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { PublicHome } from "@/components/public/PublicHome";
-import { getPrivateDrawAudience } from "@/lib/private-draws";
+import { PRIVATE_DRAW_MAXIMUM_RANGE, getPrivateDrawAudience } from "@/lib/private-draws";
 import { getSiteSettings } from "@/lib/public-data";
 
 export const dynamic = "force-dynamic";
@@ -63,7 +63,7 @@ export default async function PrivateDrawAudiencePage({ params }: { params: Prom
           confettiEnabled: settings.confettiEnabled,
           defaultFrom: draw.minNumber,
           defaultTo: draw.maxNumber,
-          maximumAllowedRange: Math.max(draw.maxNumber - draw.minNumber + 1, 2),
+          maximumAllowedRange: PRIVATE_DRAW_MAXIMUM_RANGE,
           publicDisclosureMessage: settings.publicDisclosureMessage
         }}
         initialResults={[]}

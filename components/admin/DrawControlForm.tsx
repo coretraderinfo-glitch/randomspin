@@ -321,7 +321,12 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
             <div>
               <p className="text-xs font-black uppercase tracking-[0.22em] text-[#f6d98f]">Next Round Winner</p>
               <p className="mt-2 text-sm font-bold text-white">
-                {pendingOperatorWinner === null ? "No next winner set" : `Next winner set: ${pendingOperatorWinner}`}
+                {pendingOperatorWinner === null ? "Next Winner: Not set" : "Next Winner: Set"}
+              </p>
+              <p className="mt-2 text-sm text-[#aeb7ca]">
+                {pendingOperatorWinner === null
+                  ? "Next spin will be random."
+                  : `Next spin will use the confirmed number once. Confirmed number: ${pendingOperatorWinner}`}
               </p>
               {mode !== "OPERATOR" ? (
                 <p className="mt-2 text-sm text-[#aeb7ca]">Switch Draw Mode to Operator Winner before setting a confirmed number.</p>

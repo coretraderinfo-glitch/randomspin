@@ -550,6 +550,131 @@ describe("public spin experience", () => {
     expect(screen.queryByText(/Next Winner/i)).not.toBeInTheDocument();
   });
 
+  it("private operator badge returns to random after a confirmed winner is consumed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            spinId: "spin-operator-18",
+            winner: 18,
+            timestamp: "2026-08-19T09:45:18.000Z",
+            from: 1,
+            to: 30,
+            mode: "OPERATOR",
+            nextLabel: "RANDOM DRAW"
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    render(
+      <PublicHome
+        settings={settings}
+        initialResults={[]}
+        drawMode={{
+          kind: "private",
+          publicCode: "A7K29P",
+          label: "OPERATOR DRAW",
+          spinEndpoint: "/api/draw/A7K29P/spin"
+        }}
+      />
+    );
+
+    expect(screen.getByText("OPERATOR DRAW")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    await completeSuccessfulSpin();
+
+    expectWinnerNumber(18);
+    expect(screen.getByText("RANDOM DRAW")).toBeInTheDocument();
+    expect(screen.queryByText(/pendingOperatorWinner/i)).not.toBeInTheDocument();
+  });
+
+  it("does not show a three-number range error for valid private 1-66 draws", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          spinId: "spin-66",
+          winner: 42,
+          timestamp: "2026-08-19T09:45:42.000Z",
+          from: 1,
+          to: 66,
+          mode: "RANDOM",
+          nextLabel: "RANDOM DRAW"
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <PublicHome
+        settings={{ ...settings, defaultFrom: 1, defaultTo: 66, maximumAllowedRange: 1000 }}
+        initialResults={[]}
+        drawMode={{
+          kind: "private",
+          publicCode: "A7K29P",
+          label: "RANDOM DRAW",
+          spinEndpoint: "/api/draw/A7K29P/spin"
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Please choose a range of 3 numbers or fewer.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Please choose a range of .* numbers or fewer./)).not.toBeInTheDocument();
+  });
+
+  it("private draw audience route uses the configured range safety limit, not the current draw size", () => {
+    const routeSource = fs.readFileSync(path.join(process.cwd(), "app/draw/[publicCode]/page.tsx"), "utf8");
+
+    expect(routeSource).toContain("maximumAllowedRange: PRIVATE_DRAW_MAXIMUM_RANGE");
+    expect(routeSource).not.toContain("maximumAllowedRange: Math.max(draw.maxNumber - draw.minNumber + 1, 2)");
+  });
+
+  it("private audience uses server-returned range on the same draw URL", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            spinId: "spin-live-range",
+            winner: 29,
+            timestamp: "2026-08-19T09:45:29.000Z",
+            from: 1,
+            to: 30
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    render(
+      <PublicHome
+        settings={{ ...settings, defaultFrom: 1, defaultTo: 28, maximumAllowedRange: 28 }}
+        initialResults={[]}
+        drawMode={{
+          kind: "private",
+          publicCode: "A7K29P",
+          label: "RANDOM DRAW",
+          spinEndpoint: "/api/draw/A7K29P/spin"
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    await completeSuccessfulSpin();
+
+    expect(screen.getByRole("spinbutton", { name: "To" })).toHaveValue(30);
+    expectWinnerNumber(29);
+  });
+
   it("number roller supports SPIN AGAIN after the winner modal closes", async () => {
     const fetchMock = mockSpinResponses(9, 14);
     vi.stubGlobal("fetch", fetchMock);

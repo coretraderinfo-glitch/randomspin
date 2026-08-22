@@ -8,6 +8,7 @@ import { buildEligiblePool, parseExcludedNumbers, selectSecureWinner, SpinValida
 
 export const PRIVATE_DRAW_RANDOM_MODE = "RANDOM";
 export const PRIVATE_DRAW_OPERATOR_MODE = "OPERATOR";
+export const PRIVATE_DRAW_MAXIMUM_RANGE = 1000;
 
 export type PrivateDrawMode = typeof PRIVATE_DRAW_RANDOM_MODE | typeof PRIVATE_DRAW_OPERATOR_MODE;
 
@@ -82,8 +83,8 @@ export function generatePrivateDrawPublicCode() {
   return code;
 }
 
-export function getPrivateDrawAudienceLabel(mode: string) {
-  return mode === PRIVATE_DRAW_OPERATOR_MODE ? "OPERATOR DRAW" : "RANDOM DRAW";
+export function getPrivateDrawAudienceLabel(mode: string, pendingOperatorWinner?: number | null) {
+  return mode === PRIVATE_DRAW_OPERATOR_MODE && pendingOperatorWinner !== null && pendingOperatorWinner !== undefined ? "OPERATOR DRAW" : "RANDOM DRAW";
 }
 
 export function validateOperatorWinner(draw: NormalizedPrivateDraw, winner: unknown) {
@@ -95,7 +96,7 @@ export function validateOperatorWinner(draw: NormalizedPrivateDraw, winner: unkn
     configMin: draw.minNumber,
     configMax: draw.maxNumber,
     excludedNumbers: draw.excludedNumbers,
-    maximumAllowedRange: 1000
+    maximumAllowedRange: PRIVATE_DRAW_MAXIMUM_RANGE
   });
 
   if (!eligiblePool.includes(winner as number)) {
@@ -117,7 +118,7 @@ function validateDrawRange(minNumber: number, maxNumber: number) {
     throw new SpinValidationError("FROM must be lower than TO.");
   }
 
-  if (maxNumber - minNumber + 1 > 1000) {
+  if (maxNumber - minNumber + 1 > PRIVATE_DRAW_MAXIMUM_RANGE) {
     throw new SpinValidationError("Private draw range can include at most 1,000 numbers.");
   }
 }
@@ -173,6 +174,15 @@ export async function getPrivateDrawAudience(publicCode: string) {
   }
 
   const normalized = normalizePrivateDraw(draw);
+  let pendingOperatorWinner = normalized.pendingOperatorWinner;
+
+  if (normalized.mode === PRIVATE_DRAW_OPERATOR_MODE && pendingOperatorWinner !== null && !isValidPendingWinner(normalized, pendingOperatorWinner)) {
+    await prisma.privateDraw.updateMany({
+      where: { id: normalized.id, pendingOperatorWinner },
+      data: { pendingOperatorWinner: null }
+    });
+    pendingOperatorWinner = null;
+  }
 
   return {
     id: normalized.id,
@@ -182,7 +192,7 @@ export async function getPrivateDrawAudience(publicCode: string) {
     maxNumber: normalized.maxNumber,
     mode: normalized.mode,
     displayStyle: normalized.displayStyle,
-    label: getPrivateDrawAudienceLabel(normalized.mode)
+    label: getPrivateDrawAudienceLabel(normalized.mode, pendingOperatorWinner)
   };
 }
 
@@ -350,38 +360,61 @@ export async function createPrivateDrawSpin({
     const normalized = normalizePrivateDraw(draw);
     let winner: number;
     let eligiblePool: number[];
+    let resultMode: PrivateDrawMode = PRIVATE_DRAW_RANDOM_MODE;
     const requestedMin = normalized.minNumber;
     const requestedMax = normalized.maxNumber;
-
-    if (normalized.mode === PRIVATE_DRAW_OPERATOR_MODE) {
-      if (normalized.pendingOperatorWinner === null) {
-        throw new SpinValidationError("This draw is not ready yet.");
-      }
-
-      const operatorSelection = validateOperatorWinner(normalized, normalized.pendingOperatorWinner);
-      winner = operatorSelection.winner;
-      eligiblePool = operatorSelection.eligiblePool;
-
-      const consumed = await tx.privateDraw.updateMany({
-        where: {
-          id: normalized.id,
-          pendingOperatorWinner: winner
-        },
-        data: {
-          pendingOperatorWinner: null
-        }
-      });
-
-      if (consumed.count !== 1) {
-        throw new SpinValidationError("This draw is not ready yet.");
-      }
-    } else {
-      const randomSelection = selectSecureWinner(normalized.minNumber, normalized.maxNumber, {
+    const selectRandomFallback = () =>
+      selectSecureWinner(normalized.minNumber, normalized.maxNumber, {
         configMin: normalized.minNumber,
         configMax: normalized.maxNumber,
         excludedNumbers: normalized.excludedNumbers,
-        maximumAllowedRange: 1000
+        maximumAllowedRange: PRIVATE_DRAW_MAXIMUM_RANGE
       });
+
+    if (normalized.mode === PRIVATE_DRAW_OPERATOR_MODE && normalized.pendingOperatorWinner !== null) {
+      try {
+        const operatorSelection = validateOperatorWinner(normalized, normalized.pendingOperatorWinner);
+        winner = operatorSelection.winner;
+        eligiblePool = operatorSelection.eligiblePool;
+        resultMode = PRIVATE_DRAW_OPERATOR_MODE;
+      } catch (error) {
+        if (!(error instanceof SpinValidationError)) {
+          throw error;
+        }
+
+        await tx.privateDraw.updateMany({
+          where: {
+            id: normalized.id,
+            pendingOperatorWinner: normalized.pendingOperatorWinner
+          },
+          data: {
+            pendingOperatorWinner: null
+          }
+        });
+
+        const randomSelection = selectRandomFallback();
+        winner = randomSelection.winner;
+        eligiblePool = randomSelection.eligiblePool;
+        resultMode = PRIVATE_DRAW_RANDOM_MODE;
+      }
+
+      if (resultMode === PRIVATE_DRAW_OPERATOR_MODE) {
+        const consumed = await tx.privateDraw.updateMany({
+          where: {
+            id: normalized.id,
+            pendingOperatorWinner: winner
+          },
+          data: {
+            pendingOperatorWinner: null
+          }
+        });
+
+        if (consumed.count !== 1) {
+          throw new SpinValidationError("This draw is already processing the confirmed winner. Please try again.");
+        }
+      }
+    } else {
+      const randomSelection = selectRandomFallback();
       winner = randomSelection.winner;
       eligiblePool = randomSelection.eligiblePool;
     }
@@ -393,7 +426,7 @@ export async function createPrivateDrawSpin({
         requestedMax,
         winningNumber: winner,
         eligibleCount: eligiblePool.length,
-        mode: normalized.mode,
+        mode: resultMode,
         hashedIp,
         userAgent
       }
@@ -405,7 +438,8 @@ export async function createPrivateDrawSpin({
       timestamp: result.createdAt.toISOString(),
       from: requestedMin,
       to: requestedMax,
-      mode: normalized.mode
+      mode: resultMode,
+      nextLabel: getPrivateDrawAudienceLabel(normalized.mode, null)
     };
   });
 }
