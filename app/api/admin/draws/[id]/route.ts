@@ -11,6 +11,7 @@ import {
   PRIVATE_DRAW_OPERATOR_MODE,
   PRIVATE_DRAW_RANDOM_MODE,
   PrivateDrawNotFoundError,
+  PrivateDrawSlugError,
   PrivateDrawStateError,
   archivePrivateDraw,
   deletePrivateDrawPermanently,
@@ -27,6 +28,7 @@ export const dynamic = "force-dynamic";
 
 const drawUpdateSchema = z.object({
   name: z.string().trim().min(1).max(120),
+  liveSlug: z.string().max(80).nullable().optional(),
   minNumber: z.coerce.number().int().min(-1_000_000).max(1_000_000),
   maxNumber: z.coerce.number().int().min(-1_000_000).max(1_000_000),
   excludedNumbers: z.array(z.number().int()).max(1000).optional(),
@@ -88,6 +90,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       id,
       input: {
         name: parsed.data.name,
+        liveSlug: parsed.data.liveSlug,
         minNumber: parsed.data.minNumber,
         maxNumber: parsed.data.maxNumber,
         excludedNumbers: parsed.data.excludedNumbers,
@@ -110,6 +113,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     if (error instanceof SpinValidationError) {
+      return jsonError(error.message, 400);
+    }
+
+    if (error instanceof PrivateDrawSlugError) {
       return jsonError(error.message, 400);
     }
 
@@ -147,6 +154,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
 
     if (error instanceof PrivateDrawStateError || error instanceof SpinValidationError) {
+      return jsonError(error.message, 400);
+    }
+
+    if (error instanceof PrivateDrawSlugError) {
       return jsonError(error.message, 400);
     }
 

@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS "WheelConfiguration" (
 CREATE TABLE IF NOT EXISTS "PrivateDraw" (
   "id" TEXT NOT NULL PRIMARY KEY,
   "publicCode" TEXT NOT NULL UNIQUE,
+  "liveSlug" TEXT UNIQUE,
   "name" TEXT NOT NULL DEFAULT 'Private Draw',
   "minNumber" INTEGER NOT NULL DEFAULT 1,
   "maxNumber" INTEGER NOT NULL DEFAULT 30,
@@ -195,10 +196,13 @@ function ensureColumn(table, column, definition) {
 
 ensureColumn("PrivateDraw", "displayStyle", "TEXT NOT NULL DEFAULT 'WHEEL'");
 ensureColumn("PrivateDraw", "archivedAt", "DATETIME");
+ensureColumn("PrivateDraw", "liveSlug", "TEXT");
 ensureColumn("PlayerDraw", "archivedAt", "DATETIME");
 
 db.exec(`
 CREATE INDEX IF NOT EXISTS "PrivateDraw_archivedAt_idx" ON "PrivateDraw" ("archivedAt");
+CREATE UNIQUE INDEX IF NOT EXISTS "PrivateDraw_liveSlug_key" ON "PrivateDraw" ("liveSlug");
+CREATE INDEX IF NOT EXISTS "PrivateDraw_liveSlug_idx" ON "PrivateDraw" ("liveSlug");
 CREATE INDEX IF NOT EXISTS "PlayerDraw_archivedAt_idx" ON "PlayerDraw" ("archivedAt");
 `);
 

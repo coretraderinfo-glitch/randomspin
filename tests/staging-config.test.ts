@@ -39,6 +39,7 @@ describe("staging configuration safety", () => {
     expect(robots).toContain("isPublicIndexingDisabled");
     expect(robots).toContain('disallow: "/"');
     expect(robots).toContain('"/draw/"');
+    expect(robots).toContain('"/live/"');
     expect(robots).toContain('"/players/"');
     expect(layout).toContain("index: !isPublicIndexingDisabled()");
     expect(proxy).toContain("X-Robots-Tag");

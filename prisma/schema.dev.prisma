@@ -47,6 +47,7 @@ model WheelConfiguration {
 model PrivateDraw {
   id                    String                  @id @default(uuid())
   publicCode            String                  @unique
+  liveSlug              String?                 @unique
   name                  String                  @default("Private Draw")
   minNumber             Int                     @default(1)
   maxNumber             Int                     @default(30)
@@ -63,6 +64,7 @@ model PrivateDraw {
   spinResults           PrivateDrawSpinResult[]
 
   @@index([publicCode])
+  @@index([liveSlug])
   @@index([isActive])
   @@index([archivedAt])
 }

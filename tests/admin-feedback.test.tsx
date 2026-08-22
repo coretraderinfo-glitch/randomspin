@@ -11,6 +11,7 @@ import { SuccessBanner } from "@/components/admin/feedback";
 const privateDraw = {
   id: "draw-1",
   publicCode: "A7K29P",
+  liveSlug: null,
   name: "Event Draw",
   minNumber: 1,
   maxNumber: 66,
@@ -96,6 +97,20 @@ describe("admin feedback banners", () => {
 
     rerender(<SuccessBanner message="   " />);
     expect(container.querySelector(".success-banner")).not.toBeInTheDocument();
+  });
+
+  it("shows and copies the canonical live URL for private draws", async () => {
+    const liveDraw = { ...privateDraw, liveSlug: "friday" };
+
+    render(<PrivateDrawManager initialDraws={[liveDraw]} />);
+
+    expect(screen.getByText("Live URL: /live/friday")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /OPEN AUDIENCE/i })).toHaveAttribute("href", "/live/friday");
+
+    fireEvent.click(screen.getByRole("button", { name: "COPY LIVE LINK" }));
+
+    await waitFor(() => expect(screen.getByText("Live link copied.")).toBeInTheDocument());
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("http://localhost:3000/live/friday");
   });
 
   it("deactivates and activates private draws with visible feedback", async () => {

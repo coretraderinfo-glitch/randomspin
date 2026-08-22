@@ -7,6 +7,7 @@ const baseDraw = {
   id: "draw-1",
   name: "Event Draw",
   publicCode: "A7K29P",
+  liveSlug: null,
   minNumber: 1,
   maxNumber: 30,
   excludedNumbers: [3, 9, 13, 18],

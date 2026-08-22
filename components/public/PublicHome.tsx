@@ -49,7 +49,8 @@ export type PublicDrawMode =
   | {
       kind: "public";
       spinEndpoint?: string;
-      label?: null;
+      label?: string | null;
+      sharePath?: string;
     }
   | {
       kind: "private";
@@ -57,6 +58,7 @@ export type PublicDrawMode =
       spinEndpoint: string;
       label?: string;
       displayStyle?: PrivateDrawDisplayStyle;
+      sharePath?: string;
     };
 
 type SpinResponse = {
@@ -132,9 +134,9 @@ export function PublicHome({
   ]);
   const spinButtonLabel = hasCompletedSpin ? "SPIN AGAIN" : "SPIN";
   const spinEndpoint = drawMode.spinEndpoint ?? "/api/spin";
-  const initialDrawModeLabel = drawMode.kind === "private" ? drawMode.label ?? "PRIVATE EVENT DRAW" : null;
+  const initialDrawModeLabel = drawMode.kind === "private" ? drawMode.label ?? "RANDOM DRAW" : drawMode.label ?? "RANDOM DRAW";
   const [liveDrawModeLabel, setLiveDrawModeLabel] = useState(initialDrawModeLabel);
-  const drawModeLabel = drawMode.kind === "private" ? liveDrawModeLabel : null;
+  const drawModeLabel = drawMode.kind === "private" ? liveDrawModeLabel : initialDrawModeLabel;
   const configuredViewMode =
     drawMode.kind === "private" ? normalizePrivateDrawDisplayStyle(drawMode.displayStyle) : PRIVATE_DRAW_WHEEL_DISPLAY;
   const initialViewMode =
@@ -708,13 +710,15 @@ export function PublicHome({
       return;
     }
 
+    const sharePath = drawMode.sharePath ?? "/";
+    const shareUrl = `${window.location.origin}${sharePath}`;
     const text = `I used RandomSpin and got number ${winner}!`;
     if (navigator.share) {
-      await navigator.share({ title: "RandomSpin", text, url: window.location.origin });
+      await navigator.share({ title: "RandomSpin", text, url: shareUrl });
       return;
     }
 
-    await navigator.clipboard.writeText(`${text} ${window.location.origin}`);
+    await navigator.clipboard.writeText(`${text} ${shareUrl}`);
     setMessageTone("neutral");
     setMessage("Result link copied.");
   }
@@ -758,7 +762,7 @@ export function PublicHome({
         <header className="flex items-center justify-between gap-4">
           <BrandMark />
           <div className="flex items-center gap-3">
-            {drawMode.kind === "public" ? <PublicGameNav active="spin" /> : null}
+            <PublicGameNav active="spin" />
             <nav className="hidden items-center gap-5 text-sm font-bold text-[#aeb7ca] md:flex" aria-label="Public navigation">
               <a className="hover:text-white" href="/faq">
                 FAQ

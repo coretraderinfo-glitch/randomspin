@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getAdminFromRequest: vi.fn(),
   rateLimit: vi.fn(),
   privateDrawFindMany: vi.fn(),
+  privateDrawFindFirst: vi.fn(),
   privateDrawFindUnique: vi.fn(),
   privateDrawCreate: vi.fn(),
   privateDrawUpdate: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     privateDraw: {
       findMany: mocks.privateDrawFindMany,
+      findFirst: mocks.privateDrawFindFirst,
       findUnique: mocks.privateDrawFindUnique,
       create: mocks.privateDrawCreate,
       update: mocks.privateDrawUpdate,
@@ -35,6 +37,7 @@ vi.mock("@/lib/db", () => ({
 const baseDraw = {
   id: "draw-1",
   publicCode: "A7K29P",
+  liveSlug: null,
   name: "Event Draw",
   minNumber: 1,
   maxNumber: 10,
@@ -55,6 +58,7 @@ describe("private draw operator mode APIs", () => {
     mocks.rateLimit.mockResolvedValue({ allowed: true });
     mocks.privateDrawFindMany.mockResolvedValue([{ ...baseDraw, _count: { spinResults: 0 } }]);
     mocks.privateDrawFindUnique.mockResolvedValue(baseDraw);
+    mocks.privateDrawFindFirst.mockImplementation((args) => mocks.privateDrawFindUnique(args));
     mocks.privateDrawCreate.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
       ...baseDraw,
       id: "draw-created",
@@ -73,6 +77,7 @@ describe("private draw operator mode APIs", () => {
     mocks.transaction.mockImplementation(async (callback) =>
       callback({
         privateDraw: {
+          findFirst: mocks.privateDrawFindFirst,
           findUnique: mocks.privateDrawFindUnique,
           updateMany: mocks.privateDrawUpdateMany
         },
@@ -136,6 +141,49 @@ describe("private draw operator mode APIs", () => {
         data: expect.objectContaining({ mode: "OPERATOR", pendingOperatorWinner: 20 })
       })
     );
+  });
+
+  it("admin can set a normalized friendly live URL", async () => {
+    mocks.privateDrawFindFirst.mockResolvedValue(null);
+    const { PUT } = await import("@/app/api/admin/draws/[id]/route");
+
+    const response = await PUT(adminRequest(adminPayload({ liveSlug: " Friday-Draw " })), {
+      params: Promise.resolve({ id: "draw-1" })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.draw.liveSlug).toBe("friday-draw");
+    expect(mocks.privateDrawUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ liveSlug: "friday-draw" })
+      })
+    );
+  });
+
+  it("rejects duplicate friendly live URLs", async () => {
+    mocks.privateDrawFindFirst.mockResolvedValue({ id: "other-draw" });
+    const { PUT } = await import("@/app/api/admin/draws/[id]/route");
+
+    const response = await PUT(adminRequest(adminPayload({ liveSlug: "friday" })), {
+      params: Promise.resolve({ id: "draw-1" })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("That live URL is already in use.");
+    expect(mocks.privateDrawUpdate).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid friendly live URL characters", async () => {
+    const { PUT } = await import("@/app/api/admin/draws/[id]/route");
+
+    const response = await PUT(adminRequest(adminPayload({ liveSlug: "Friday Draw!" })), {
+      params: Promise.resolve({ id: "draw-1" })
+    });
+
+    expect(response.status).toBe(400);
+    expect(mocks.privateDrawUpdate).not.toHaveBeenCalled();
   });
 
   it("rejects a next confirmed number outside the current range", async () => {
@@ -464,6 +512,7 @@ describe("private draw operator mode APIs", () => {
     expect(draw).toEqual({
       id: "draw-1",
       publicCode: "A7K29P",
+      liveSlug: null,
       name: "Event Draw",
       minNumber: 1,
       maxNumber: 10,
@@ -678,9 +727,10 @@ describe("private draw operator mode APIs", () => {
   it("keeps private draw results isolated by public code", async () => {
     const drawA = { ...baseDraw, id: "draw-a", publicCode: "AAAA2222", pendingOperatorWinner: 3, excludedNumbers: [] };
     const drawB = { ...baseDraw, id: "draw-b", publicCode: "BBBB3333", pendingOperatorWinner: 9, excludedNumbers: [] };
-    mocks.privateDrawFindUnique.mockImplementation(async ({ where }: { where: { publicCode?: string } }) =>
-      where.publicCode === "BBBB3333" ? drawB : drawA
-    );
+    mocks.privateDrawFindFirst.mockImplementation(async ({ where }: { where: { OR?: Array<{ publicCode?: string; liveSlug?: string }> } }) => {
+      const publicCode = where.OR?.find((item) => item.publicCode)?.publicCode;
+      return publicCode === "BBBB3333" ? drawB : drawA;
+    });
     mocks.privateDrawSpinCreate.mockImplementation(async ({ data }: { data: { privateDrawId: string; winningNumber: number } }) => ({
       id: `spin-${data.privateDrawId}`,
       winningNumber: data.winningNumber,

@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Copy, ExternalLink, Plus, Save } from "lucide-react";
+import { ExternalLink, Plus, Save } from "lucide-react";
 import { SuccessBanner, normalizeFeedbackMessage } from "@/components/admin/feedback";
 
 type DrawItem = {
   id: string;
   publicCode: string;
+  liveSlug: string | null;
   name: string;
   minNumber: number;
   maxNumber: number;
@@ -55,10 +56,10 @@ export function PrivateDrawManager({ initialDraws }: { initialDraws: DrawItem[] 
     return () => window.clearTimeout(timer);
   }, [message]);
 
-  async function copyLink(publicCode: string) {
+  async function copyLink(draw: Pick<DrawItem, "publicCode" | "liveSlug">) {
     const origin = typeof window === "undefined" ? "" : window.location.origin;
-    await navigator.clipboard.writeText(`${origin}/draw/${publicCode}`);
-    setMessage("Audience link copied.");
+    await navigator.clipboard.writeText(`${origin}${getLivePath(draw)}`);
+    setMessage("Live link copied.");
   }
 
   async function createDraw() {
@@ -187,6 +188,10 @@ export function PrivateDrawManager({ initialDraws }: { initialDraws: DrawItem[] 
   const archivedDraws = draws.filter((draw) => draw.archivedAt);
   const visibleDraws = view === "archived" ? archivedDraws : currentDraws;
 
+  function getLivePath(draw: Pick<DrawItem, "publicCode" | "liveSlug">) {
+    return `/live/${draw.liveSlug ?? draw.publicCode}`;
+  }
+
   return (
     <div className="grid gap-5">
       <section className="glass rounded-xl p-5">
@@ -312,6 +317,7 @@ export function PrivateDrawManager({ initialDraws }: { initialDraws: DrawItem[] 
                       Code {draw.publicCode} · Range {draw.minNumber}-{draw.maxNumber} · Excluded {draw.excludedNumbers.length} · Spins{" "}
                       {draw.completedSpins}
                     </p>
+                    <p className="mt-1 text-sm text-[#aeb7ca]">Live URL: {getLivePath(draw)}</p>
                     <p className="mt-1 text-sm text-[#aeb7ca]">
                       Created {formatDate(draw.createdAt)} · Updated {formatDate(draw.updatedAt)}
                     </p>
@@ -354,21 +360,20 @@ export function PrivateDrawManager({ initialDraws }: { initialDraws: DrawItem[] 
                         {draw.isActive ? (
                           <>
                             <button
-                              className="focus-ring grid size-11 place-items-center rounded-lg border border-white/12 bg-white/8 text-white hover:bg-white/12"
+                              className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-bold text-white hover:bg-white/12"
                               type="button"
-                              aria-label={`Copy ${draw.name} audience link`}
-                              onClick={() => copyLink(draw.publicCode)}
+                              onClick={() => copyLink(draw)}
                             >
-                              <Copy className="size-4" />
+                              COPY LIVE LINK
                             </button>
                             <a
-                              className="focus-ring grid size-11 place-items-center rounded-lg border border-white/12 bg-white/8 text-white hover:bg-white/12"
-                              href={`/draw/${draw.publicCode}`}
+                              className="focus-ring flex items-center gap-2 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-bold text-white hover:bg-white/12"
+                              href={getLivePath(draw)}
                               target="_blank"
                               rel="noreferrer"
-                              aria-label={`Open ${draw.name} audience view`}
                             >
                               <ExternalLink className="size-4" />
+                              OPEN AUDIENCE
                             </a>
                           </>
                         ) : null}

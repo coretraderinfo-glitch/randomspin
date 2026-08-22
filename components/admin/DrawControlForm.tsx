@@ -8,6 +8,7 @@ type DrawState = {
   id: string;
   name: string;
   publicCode: string;
+  liveSlug: string | null;
   minNumber: number;
   maxNumber: number;
   excludedNumbers: number[];
@@ -44,6 +45,7 @@ function parseExcludedText(value: string) {
 
 export function DrawControlForm({ draw }: DrawControlFormProps) {
   const [name, setName] = useState(draw.name);
+  const [liveSlug, setLiveSlug] = useState(draw.liveSlug ?? "");
   const [minNumber, setMinNumber] = useState(draw.minNumber);
   const [maxNumber, setMaxNumber] = useState(draw.maxNumber);
   const [excludedText, setExcludedText] = useState(draw.excludedNumbers.join(","));
@@ -74,7 +76,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
 
     return Array.from({ length: maxNumber - minNumber + 1 }, (_, index) => minNumber + index);
   }, [minNumber, maxNumber]);
-  const audiencePath = `/draw/${draw.publicCode}`;
+  const audiencePath = `/live/${liveSlug.trim().toLowerCase() || draw.publicCode}`;
 
   function toggleExcluded(value: number) {
     const next = excludedNumbers.includes(value)
@@ -91,6 +93,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
 
   function applyServerDraw(serverDraw: DrawState) {
     setName(serverDraw.name);
+    setLiveSlug(serverDraw.liveSlug ?? "");
     setMinNumber(serverDraw.minNumber);
     setMaxNumber(serverDraw.maxNumber);
     setExcludedText(serverDraw.excludedNumbers.join(","));
@@ -145,6 +148,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name,
+        liveSlug: liveSlug.trim() || null,
         minNumber,
         maxNumber,
         excludedText,
@@ -195,7 +199,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
               onClick={copyAudienceLink}
             >
               <Copy className="size-4" />
-              COPY LINK
+              COPY LIVE LINK
             </button>
             <a
               className="focus-ring flex items-center gap-2 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-bold text-white hover:bg-white/12"
@@ -204,7 +208,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
               rel="noreferrer"
             >
               <ExternalLink className="size-4" />
-              OPEN AUDIENCE VIEW
+              OPEN AUDIENCE
             </a>
             <a
               className="focus-ring flex items-center gap-2 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-bold text-white hover:bg-white/12"
@@ -255,6 +259,20 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
               value={name}
               onChange={(event) => setName(event.target.value)}
             />
+          </label>
+          <label className="sm:col-span-2">
+            <span className="mb-2 block text-xs font-black uppercase tracking-[0.18em] text-[#aeb7ca]">Live URL</span>
+            <div className="grid gap-2 sm:grid-cols-[auto_1fr] sm:items-center">
+              <span className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-bold text-[#aeb7ca]">
+                /live/
+              </span>
+              <input
+                className="focus-ring h-12 w-full rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white"
+                value={liveSlug}
+                onChange={(event) => setLiveSlug(event.target.value)}
+                placeholder={draw.publicCode}
+              />
+            </div>
           </label>
           <label>
             <span className="mb-2 block text-xs font-black uppercase tracking-[0.18em] text-[#aeb7ca]">From</span>

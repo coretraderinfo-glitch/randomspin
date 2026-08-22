@@ -149,6 +149,7 @@ describe("public spin experience", () => {
 
     render(<PublicHome settings={settings} initialResults={[]} />);
     expect(screen.getAllByRole("button", { name: "SPIN" }).length).toBeGreaterThan(0);
+    expect(screen.getByText("RANDOM DRAW")).toBeInTheDocument();
     expect(screen.queryByText("PRIVATE EVENT DRAW")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
@@ -238,19 +239,22 @@ describe("public spin experience", () => {
         drawMode={{
           kind: "private",
           publicCode: "A7K29P",
-          label: "PRIVATE EVENT DRAW",
+          label: "RANDOM DRAW",
           spinEndpoint: "/api/draw/A7K29P/spin"
         }}
       />
     );
 
     expect(screen.getAllByText(/RandomSpin/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "Number Draw" })[0]).toHaveAttribute("href", "/");
+    expect(screen.getAllByRole("link", { name: "Player Draw" })[0]).toHaveAttribute("href", "/players");
     expect(screen.getAllByRole("link", { name: "FAQ" })[0]).toHaveAttribute("href", "/faq");
     expect(screen.getAllByRole("link", { name: "About" })[0]).toHaveAttribute("href", "/about");
     expect(screen.getByRole("button", { name: "Wheel" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Number" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByLabelText("RandomSpin number wheel")).toBeInTheDocument();
-    expect(screen.getByText("PRIVATE EVENT DRAW")).toBeInTheDocument();
+    expect(screen.getByText("RANDOM DRAW")).toBeInTheDocument();
+    expect(screen.queryByText("PRIVATE EVENT DRAW")).not.toBeInTheDocument();
     expect(screen.queryByText("A7K29P")).not.toBeInTheDocument();
     expect(screen.queryByText(/Admin/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Excluded/i)).not.toBeInTheDocument();
@@ -671,8 +675,8 @@ describe("public spin experience", () => {
     expect(screen.queryByText(/Please choose a range of .* numbers or fewer./)).not.toBeInTheDocument();
   });
 
-  it("private draw audience route uses the configured range safety limit, not the current draw size", () => {
-    const routeSource = fs.readFileSync(path.join(process.cwd(), "app/draw/[publicCode]/page.tsx"), "utf8");
+  it("private live audience route uses the configured range safety limit, not the current draw size", () => {
+    const routeSource = fs.readFileSync(path.join(process.cwd(), "app/live/[code]/page.tsx"), "utf8");
 
     expect(routeSource).toContain("maximumAllowedRange: PRIVATE_DRAW_MAXIMUM_RANGE");
     expect(routeSource).not.toContain("maximumAllowedRange: Math.max(draw.maxNumber - draw.minNumber + 1, 2)");
@@ -852,15 +856,26 @@ describe("public spin experience", () => {
     expect(screen.queryByText(/Next Winner/i)).not.toBeInTheDocument();
   });
 
-  it("draw audience route reuses PublicHome instead of cloning the public frontend", () => {
-    const routeSource = fs.readFileSync(path.join(process.cwd(), "app/draw/[publicCode]/page.tsx"), "utf8");
+  it("live audience route reuses PublicHome instead of cloning the public frontend", () => {
+    const routeSource = fs.readFileSync(path.join(process.cwd(), "app/live/[code]/page.tsx"), "utf8");
 
     expect(routeSource).toContain('import { PublicHome } from "@/components/public/PublicHome"');
     expect(routeSource).toContain("<PublicHome");
+    expect(routeSource).toContain("robots");
+    expect(routeSource).toContain("index: false");
+    expect(routeSource).toContain("getPrivateDrawLivePath");
     expect(routeSource).not.toContain("LuckyWheel");
     expect(routeSource).not.toContain("WinnerModal");
     expect(routeSource).not.toContain("RangeSelector");
     expect(routeSource).not.toContain("RecentResults");
+  });
+
+  it("legacy draw audience route redirects to the canonical live URL", () => {
+    const routeSource = fs.readFileSync(path.join(process.cwd(), "app/draw/[publicCode]/page.tsx"), "utf8");
+
+    expect(routeSource).toContain("redirect(`/live/${encodeURIComponent(publicCode)}`)");
+    expect(routeSource).not.toContain("<PublicHome");
+    expect(routeSource).not.toContain("getPrivateDrawAudience");
   });
 
   it("keeps one shared spin controller for both visual views", () => {

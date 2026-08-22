@@ -10,6 +10,7 @@ import {
 import {
   PRIVATE_DRAW_OPERATOR_MODE,
   PRIVATE_DRAW_RANDOM_MODE,
+  PrivateDrawSlugError,
   createPrivateDraw,
   listPrivateDraws,
   type PrivateDrawMode
@@ -22,6 +23,7 @@ export const dynamic = "force-dynamic";
 
 const drawCreateSchema = z.object({
   name: z.string().trim().min(1).max(120),
+  liveSlug: z.string().max(80).nullable().optional(),
   minNumber: z.coerce.number().int().min(-1_000_000).max(1_000_000),
   maxNumber: z.coerce.number().int().min(-1_000_000).max(1_000_000),
   excludedNumbers: z.array(z.number().int()).max(1000).optional(),
@@ -61,6 +63,7 @@ export async function POST(request: NextRequest) {
 
     const draw = await createPrivateDraw({
       name: parsed.data.name,
+      liveSlug: parsed.data.liveSlug,
       minNumber: parsed.data.minNumber,
       maxNumber: parsed.data.maxNumber,
       excludedNumbers: parsed.data.excludedNumbers,
@@ -74,6 +77,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ draw, message: "Private draw created successfully." }, { status: 201 });
   } catch (error) {
     if (error instanceof SpinValidationError) {
+      return jsonError(error.message, 400);
+    }
+
+    if (error instanceof PrivateDrawSlugError) {
       return jsonError(error.message, 400);
     }
 

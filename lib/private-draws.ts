@@ -15,6 +15,7 @@ export type PrivateDrawMode = typeof PRIVATE_DRAW_RANDOM_MODE | typeof PRIVATE_D
 export type PrivateDrawRecord = {
   id: string;
   publicCode: string;
+  liveSlug: string | null;
   name: string;
   minNumber: number;
   maxNumber: number;
@@ -40,6 +41,7 @@ export type PrivateDrawListItem = NormalizedPrivateDraw & {
 
 export type PrivateDrawMutationInput = {
   name: string;
+  liveSlug?: string | null;
   minNumber: number;
   maxNumber: number;
   excludedNumbers?: number[];
@@ -65,8 +67,16 @@ export class PrivateDrawStateError extends Error {
   }
 }
 
+export class PrivateDrawSlugError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PrivateDrawSlugError";
+  }
+}
+
 const publicCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const publicCodeLength = 8;
+const reservedLiveSlugs = new Set(["admin", "api", "faq", "about", "players", "draw", "live", "privacy", "terms"]);
 
 export function isPrivateDrawMode(value: unknown): value is PrivateDrawMode {
   return value === PRIVATE_DRAW_RANDOM_MODE || value === PRIVATE_DRAW_OPERATOR_MODE;
@@ -89,6 +99,36 @@ export function generatePrivateDrawPublicCode() {
   }
 
   return code;
+}
+
+export function normalizeLiveSlug(value: unknown) {
+  const raw = String(value ?? "").trim().toLowerCase();
+
+  if (!raw) {
+    return null;
+  }
+
+  if (raw.length < 3 || raw.length > 40) {
+    throw new PrivateDrawSlugError("Live URL must be 3 to 40 characters.");
+  }
+
+  if (!/^[a-z0-9-]+$/.test(raw)) {
+    throw new PrivateDrawSlugError("Live URL can use lowercase letters, numbers, and hyphens only.");
+  }
+
+  if (raw.startsWith("-") || raw.endsWith("-") || raw.includes("--")) {
+    throw new PrivateDrawSlugError("Live URL cannot start or end with a hyphen or contain repeated hyphens.");
+  }
+
+  if (reservedLiveSlugs.has(raw)) {
+    throw new PrivateDrawSlugError("Use a different live URL. That word is reserved.");
+  }
+
+  return raw;
+}
+
+export function getPrivateDrawLivePath(draw: { publicCode: string; liveSlug?: string | null }) {
+  return `/live/${draw.liveSlug ?? draw.publicCode}`;
 }
 
 export function getPrivateDrawAudienceLabel(mode: string, pendingOperatorWinner?: number | null) {
@@ -149,6 +189,16 @@ function isUniqueConstraintError(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }
 
+function isLiveSlugUniqueConstraintError(error: unknown) {
+  const target = error instanceof Prisma.PrismaClientKnownRequestError ? error.meta?.target : null;
+
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2002" &&
+    ((Array.isArray(target) && target.includes("liveSlug")) || (typeof target === "string" && target.includes("liveSlug")))
+  );
+}
+
 function isValidPendingWinner(draw: NormalizedPrivateDraw, winner: number | null) {
   if (winner === null) {
     return true;
@@ -159,6 +209,24 @@ function isValidPendingWinner(draw: NormalizedPrivateDraw, winner: number | null
     return true;
   } catch {
     return false;
+  }
+}
+
+async function assertLiveSlugAvailable(liveSlug: string | null, currentDrawId?: string) {
+  if (!liveSlug) {
+    return;
+  }
+
+  const existing = await prisma.privateDraw.findFirst({
+    where: {
+      OR: [{ liveSlug }, { publicCode: liveSlug.toUpperCase() }],
+      ...(currentDrawId ? { NOT: { id: currentDrawId } } : {})
+    },
+    select: { id: true }
+  });
+
+  if (existing) {
+    throw new PrivateDrawSlugError("That live URL is already in use.");
   }
 }
 
@@ -175,7 +243,12 @@ export async function listPrivateDraws(): Promise<PrivateDrawListItem[]> {
 }
 
 export async function getPrivateDrawAudience(publicCode: string) {
-  const draw = await prisma.privateDraw.findUnique({ where: { publicCode } });
+  const lookup = String(publicCode).trim();
+  const draw = await prisma.privateDraw.findFirst({
+    where: {
+      OR: [{ publicCode: lookup.toUpperCase() }, { liveSlug: lookup.toLowerCase() }]
+    }
+  });
 
   if (!draw || !draw.isActive || draw.archivedAt) {
     return null;
@@ -195,6 +268,7 @@ export async function getPrivateDrawAudience(publicCode: string) {
   return {
     id: normalized.id,
     publicCode: normalized.publicCode,
+    liveSlug: normalized.liveSlug,
     name: normalized.name,
     minNumber: normalized.minNumber,
     maxNumber: normalized.maxNumber,
@@ -235,11 +309,14 @@ export async function createPrivateDraw(input: PrivateDrawMutationInput) {
   }
 
   const excludedNumbers = getExcludedNumbers(input);
+  const liveSlug = normalizeLiveSlug(input.liveSlug);
+  await assertLiveSlugAvailable(liveSlug);
   const displayStyle = normalizePrivateDrawDisplayStyle(input.displayStyle);
   const provisionalDraw = normalizePrivateDraw({
     id: "new",
     publicCode: "PENDING",
     name: input.name,
+    liveSlug,
     minNumber: input.minNumber,
     maxNumber: input.maxNumber,
     excludedNumbers,
@@ -261,6 +338,7 @@ export async function createPrivateDraw(input: PrivateDrawMutationInput) {
       const created = await prisma.privateDraw.create({
         data: {
           publicCode: generatePrivateDrawPublicCode(),
+          liveSlug,
           name: input.name,
           minNumber: input.minNumber,
           maxNumber: input.maxNumber,
@@ -275,6 +353,10 @@ export async function createPrivateDraw(input: PrivateDrawMutationInput) {
 
       return normalizePrivateDraw(created);
     } catch (error) {
+      if (isLiveSlugUniqueConstraintError(error)) {
+        throw new PrivateDrawSlugError("That live URL is already in use.");
+      }
+
       if (!isUniqueConstraintError(error)) {
         throw error;
       }
@@ -304,10 +386,13 @@ export async function updatePrivateDraw({
   }
 
   const excludedNumbers = getExcludedNumbers(input);
+  const liveSlug = normalizeLiveSlug(input.liveSlug);
+  await assertLiveSlugAvailable(liveSlug, id);
   const displayStyle = normalizePrivateDrawDisplayStyle(input.displayStyle ?? draw.displayStyle);
   const nextDraw = normalizePrivateDraw({
     ...draw,
     name: input.name,
+    liveSlug,
     minNumber: input.minNumber,
     maxNumber: input.maxNumber,
     excludedNumbers,
@@ -335,6 +420,7 @@ export async function updatePrivateDraw({
     where: { id },
     data: {
       name: input.name,
+      liveSlug,
       minNumber: input.minNumber,
       maxNumber: input.maxNumber,
       excludedNumbers: serializeExcludedNumbers(excludedNumbers),
@@ -361,7 +447,12 @@ export async function createPrivateDrawSpin({
   userAgent?: string | null;
 }) {
   return prisma.$transaction(async (tx) => {
-    const draw = await tx.privateDraw.findUnique({ where: { publicCode } });
+    const lookup = String(publicCode).trim();
+    const draw = await tx.privateDraw.findFirst({
+      where: {
+        OR: [{ publicCode: lookup.toUpperCase() }, { liveSlug: lookup.toLowerCase() }]
+      }
+    });
 
     if (!draw || !draw.isActive || draw.archivedAt) {
       throw new PrivateDrawNotFoundError();

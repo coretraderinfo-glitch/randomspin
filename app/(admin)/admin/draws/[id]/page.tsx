@@ -23,6 +23,7 @@ export default async function AdminPrivateDrawPage({ params }: { params: Promise
             id: draw.id,
             name: draw.name,
             publicCode: draw.publicCode,
+            liveSlug: draw.liveSlug,
             minNumber: draw.minNumber,
             maxNumber: draw.maxNumber,
             excludedNumbers: draw.excludedNumbers,
