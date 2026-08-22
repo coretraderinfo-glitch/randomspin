@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
       nextWinner: parsed.data.nextWinner
     });
 
-    return NextResponse.json({ draw, message: "Private draw created." }, { status: 201 });
+    return NextResponse.json({ draw, message: "Private draw created successfully." }, { status: 201 });
   } catch (error) {
     if (error instanceof SpinValidationError) {
       return jsonError(error.message, 400);

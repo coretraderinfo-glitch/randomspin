@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, Copy, ExternalLink, Save, X } from "lucide-react";
+import { SuccessBanner, normalizeFeedbackMessage } from "@/components/admin/feedback";
 
 type DrawState = {
   id: string;
@@ -54,6 +55,16 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savingAction, setSavingAction] = useState<"save" | "set" | "clear" | "refresh" | null>(null);
+
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setMessage(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
 
   const excludedNumbers = useMemo(() => parseExcludedText(excludedText), [excludedText]);
   const numbers = useMemo(() => {
@@ -92,6 +103,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
 
   async function refreshStatus() {
     setSaving(true);
+    setSavingAction("refresh");
     setMessage(null);
     setError(null);
 
@@ -99,6 +111,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
     const data = (await response.json()) as DrawResponse;
 
     setSaving(false);
+    setSavingAction(null);
 
     if (!response.ok || !data.draw) {
       setError(data.error ?? "Draw status could not be refreshed.");
@@ -123,6 +136,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
     }
 
     setSaving(true);
+    setSavingAction(action ?? "save");
     setMessage(null);
     setError(null);
 
@@ -144,6 +158,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
     const data = (await response.json()) as DrawResponse;
 
     setSaving(false);
+    setSavingAction(null);
 
     if (!response.ok) {
       setError(data.error ?? "Draw settings could not be saved.");
@@ -155,10 +170,10 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
     }
     setMessage(
       action === "set" && data.draw?.pendingOperatorWinner != null
-        ? `Next winner set: ${data.draw.pendingOperatorWinner}.`
+        ? "Next winner set successfully."
         : action === "clear"
           ? "Next winner cleared."
-          : data.message ?? "Draw settings saved."
+          : normalizeFeedbackMessage(data.message, "Draw settings saved.")
     );
   }
 
@@ -338,7 +353,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
               disabled={saving}
               onClick={() => void refreshStatus()}
             >
-              REFRESH STATUS
+              {savingAction === "refresh" ? "Refreshing..." : "REFRESH STATUS"}
             </button>
           </div>
 
@@ -361,7 +376,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
               disabled={saving || mode !== "OPERATOR"}
               onClick={() => void save("set")}
             >
-              SET NEXT WINNER
+              {savingAction === "set" ? "Setting..." : "SET NEXT WINNER"}
             </button>
             <button
               className="focus-ring rounded-lg border border-white/12 bg-white/8 px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-white hover:bg-white/12 disabled:opacity-60"
@@ -369,7 +384,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
               disabled={saving || mode !== "OPERATOR"}
               onClick={() => void save("clear")}
             >
-              CLEAR
+              {savingAction === "clear" ? "Clearing..." : "CLEAR"}
             </button>
           </div>
 
@@ -392,7 +407,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
         </div>
 
         {error ? <p className="danger-banner mt-4 rounded-lg px-4 py-3 text-sm font-semibold">{error}</p> : null}
-        {message ? <p className="mt-4 rounded-lg border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">{message}</p> : null}
+        <SuccessBanner message={message} />
 
         <div className="mt-5 flex flex-wrap gap-3">
           <button
@@ -402,7 +417,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
             onClick={() => save()}
           >
             <Save className="size-4" />
-            SAVE CHANGES
+            {savingAction === "save" ? "Saving..." : "SAVE CHANGES"}
           </button>
         </div>
       </section>

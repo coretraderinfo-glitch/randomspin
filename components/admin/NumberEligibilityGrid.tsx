@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, RotateCcw, Save, X } from "lucide-react";
+import { SuccessBanner, normalizeFeedbackMessage } from "@/components/admin/feedback";
 
 type WheelConfig = {
   minNumber: number;
@@ -29,6 +30,15 @@ export function NumberEligibilityGrid({ config }: { config: WheelConfig }) {
     minNumber !== config.minNumber ||
     maxNumber !== config.maxNumber ||
     excluded.join(",") !== config.excludedNumbers.join(",");
+
+  useEffect(() => {
+    if (!status || statusTone === "danger") {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setStatus(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [status, statusTone]);
 
   function toggle(value: number) {
     setExcluded((current) =>
@@ -61,7 +71,11 @@ export function NumberEligibilityGrid({ config }: { config: WheelConfig }) {
 
     setSaving(false);
     setStatusTone(response.ok ? "neutral" : "danger");
-    setStatus(response.ok ? data.message ?? "Wheel configuration updated successfully." : data.error ?? "Save failed.");
+    setStatus(
+      response.ok
+        ? normalizeFeedbackMessage(data.message, "Wheel configuration updated successfully.")
+        : normalizeFeedbackMessage(data.error, "Save failed.")
+    );
   }
 
   function reset() {
@@ -125,11 +139,12 @@ export function NumberEligibilityGrid({ config }: { config: WheelConfig }) {
           </button>
           <button className="gold-button focus-ring flex items-center gap-2 rounded-lg px-4 py-3 text-sm uppercase tracking-[0.14em]" onClick={save} disabled={saving}>
             <Save className="size-4" />
-            {saving ? "Saving" : "Save Changes"}
+            {saving ? "Saving..." : "Save Changes"}
           </button>
         </div>
         {hasChanges ? <p className="mt-4 text-sm font-bold text-[#f6d98f]">Unsaved Changes</p> : null}
-        {status ? (
+        {statusTone === "neutral" ? <SuccessBanner message={status} /> : null}
+        {status && statusTone === "danger" ? (
           <p className={statusTone === "danger" ? "danger-banner mt-3 rounded-lg px-4 py-3 text-sm font-semibold" : "mt-3 text-sm text-[#aeb7ca]"}>
             {status}
           </p>

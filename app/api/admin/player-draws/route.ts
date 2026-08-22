@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
       mode: parsed.data.mode as PlayerDrawMode
     });
 
-    return NextResponse.json({ draw, message: "Player draw created." }, { status: 201 });
+    return NextResponse.json({ draw, message: "Player draw created successfully." }, { status: 201 });
   } catch (error) {
     if (error instanceof SpinValidationError) {
       return jsonError(error.message, 400);

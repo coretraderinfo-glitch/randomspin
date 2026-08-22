@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Copy, Download, Save, Search, Trash2 } from "lucide-react";
+import { SuccessBanner, normalizeFeedbackMessage } from "@/components/admin/feedback";
 
 type Participant = {
   id: string;
@@ -82,6 +83,16 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savingAction, setSavingAction] = useState<"save" | "set" | "clear" | null>(null);
+
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setMessage(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
   const eligibleParticipants = state.participants.filter((participant) => participant.isEligible);
   const filteredParticipants = state.participants
     .filter((participant) => `${participant.displayName} ${participant.reference ?? ""}`.toLowerCase().includes(query.toLowerCase()))
@@ -100,6 +111,7 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
 
   async function save(action: "save" | "set" | "clear" = "save") {
     setSaving(true);
+    setSavingAction(action);
     setMessage(null);
     setError(null);
 
@@ -121,6 +133,7 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
     const data = (await response.json()) as DrawResponse;
 
     setSaving(false);
+    setSavingAction(null);
 
     if (!response.ok || !data.draw) {
       setError(data.error ?? "Player draw settings could not be saved.");
@@ -136,7 +149,7 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
     if (action === "clear") {
       setNextWinnerParticipantId("");
     }
-    setMessage(action === "set" ? "Next winner saved." : action === "clear" ? "Next winner cleared." : data.message ?? "Player draw saved.");
+    setMessage(action === "set" ? "Next winner set successfully." : action === "clear" ? "Next winner cleared." : normalizeFeedbackMessage(data.message, "Player draw settings saved."));
   }
 
   function addPastedParticipants() {
@@ -230,10 +243,10 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
                 ))}
               </select>
               <button className="gold-button focus-ring rounded-lg px-5 py-3 text-sm uppercase tracking-[0.14em] disabled:opacity-60" type="button" disabled={saving || !nextWinnerParticipantId} onClick={() => void save("set")}>
-                SET NEXT WINNER
+                {savingAction === "set" ? "Setting..." : "SET NEXT WINNER"}
               </button>
               <button className="focus-ring rounded-lg border border-white/12 bg-white/8 px-5 py-3 text-sm font-black text-white hover:bg-white/12 disabled:opacity-60" type="button" disabled={saving} onClick={() => void save("clear")}>
-                CLEAR
+                {savingAction === "clear" ? "Clearing..." : "CLEAR"}
               </button>
             </div>
             <p className="mt-3 text-sm text-[#aeb7ca]">
@@ -244,10 +257,10 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
 
         <button className="gold-button focus-ring mt-5 flex items-center gap-2 rounded-lg px-5 py-3 text-sm uppercase tracking-[0.14em] disabled:opacity-60" type="button" disabled={saving} onClick={() => void save("save")}>
           <Save className="size-4" />
-          SAVE SETTINGS
+          {savingAction === "save" ? "Saving..." : "SAVE SETTINGS"}
         </button>
         {error ? <p className="danger-banner mt-4 rounded-lg px-4 py-3 text-sm font-semibold">{error}</p> : null}
-        {message ? <p className="mt-4 rounded-lg border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">{message}</p> : null}
+        <SuccessBanner message={message} />
       </section>
 
       <section className="glass rounded-xl p-5">

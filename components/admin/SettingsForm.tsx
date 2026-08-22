@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Save } from "lucide-react";
+import { SuccessBanner, normalizeFeedbackMessage } from "@/components/admin/feedback";
 
 type Settings = {
   siteName: string;
@@ -30,6 +31,15 @@ export function SettingsForm({ settings }: { settings: Settings }) {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  useEffect(() => {
+    if (!status || statusTone === "danger") {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setStatus(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [status, statusTone]);
+
   async function save(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
@@ -42,7 +52,7 @@ export function SettingsForm({ settings }: { settings: Settings }) {
     const data = (await response.json()) as { message?: string; error?: string };
     setSaving(false);
     setStatusTone(response.ok ? "neutral" : "danger");
-    setStatus(response.ok ? data.message ?? "Settings saved." : data.error ?? "Save failed.");
+    setStatus(response.ok ? normalizeFeedbackMessage(data.message, "Settings saved.") : normalizeFeedbackMessage(data.error, "Save failed."));
   }
 
   return (
@@ -104,14 +114,15 @@ export function SettingsForm({ settings }: { settings: Settings }) {
         ))}
       </div>
 
-      {status ? (
+      {statusTone === "neutral" ? <SuccessBanner message={status} /> : null}
+      {status && statusTone === "danger" ? (
         <p className={statusTone === "danger" ? "danger-banner rounded-lg px-4 py-3 text-sm font-semibold" : "text-sm text-[#aeb7ca]"}>
           {status}
         </p>
       ) : null}
-      <button className="gold-button focus-ring flex w-fit items-center gap-2 rounded-lg px-5 py-3 text-sm uppercase tracking-[0.16em]" disabled={saving}>
+      <button className="gold-button focus-ring flex w-fit items-center gap-2 rounded-lg px-5 py-3 text-sm uppercase tracking-[0.16em] disabled:opacity-60" disabled={saving}>
         <Save className="size-4" />
-        {saving ? "Saving" : "Save Settings"}
+        {saving ? "Saving..." : "Save Settings"}
       </button>
     </form>
   );

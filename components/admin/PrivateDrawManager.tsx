@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Copy, ExternalLink, Plus, Save } from "lucide-react";
+import { SuccessBanner, normalizeFeedbackMessage } from "@/components/admin/feedback";
 
 type DrawItem = {
   id: string;
@@ -40,6 +41,16 @@ export function PrivateDrawManager({ initialDraws }: { initialDraws: DrawItem[] 
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [busyLabel, setBusyLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setMessage(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
 
   async function copyLink(publicCode: string) {
     const origin = typeof window === "undefined" ? "" : window.location.origin;
@@ -75,11 +86,12 @@ export function PrivateDrawManager({ initialDraws }: { initialDraws: DrawItem[] 
     }
 
     setDraws((current) => [{ ...data.draw!, completedSpins: 0 }, ...current]);
-    setMessage(data.message ?? "Private draw created.");
+    setMessage(normalizeFeedbackMessage(data.message, "Private draw created successfully."));
   }
 
   async function toggleActive(draw: DrawItem) {
     setBusyId(draw.id);
+    setBusyLabel(draw.isActive ? "Deactivating..." : "Activating...");
     setMessage(null);
     setError(null);
 
@@ -99,6 +111,7 @@ export function PrivateDrawManager({ initialDraws }: { initialDraws: DrawItem[] 
     const data = (await response.json()) as DrawResponse;
 
     setBusyId(null);
+    setBusyLabel(null);
 
     if (!response.ok || !data.draw) {
       setError(data.error ?? "Private draw could not be updated.");
@@ -106,7 +119,7 @@ export function PrivateDrawManager({ initialDraws }: { initialDraws: DrawItem[] 
     }
 
     setDraws((current) => current.map((item) => (item.id === draw.id ? { ...item, ...data.draw! } : item)));
-    setMessage(data.message ?? "Private draw updated.");
+    setMessage(draw.isActive ? "Draw deactivated successfully." : "Draw activated successfully.");
   }
 
   return (
@@ -177,11 +190,11 @@ export function PrivateDrawManager({ initialDraws }: { initialDraws: DrawItem[] 
             onClick={createDraw}
           >
             <Save className="size-4" />
-            + CREATE PRIVATE DRAW
+            {creating ? "Creating..." : "+ CREATE PRIVATE DRAW"}
           </button>
         </div>
         {error ? <p className="danger-banner mt-4 rounded-lg px-4 py-3 text-sm font-semibold">{error}</p> : null}
-        {message ? <p className="mt-4 rounded-lg border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">{message}</p> : null}
+        <SuccessBanner message={message} />
       </section>
 
       <section className="glass rounded-xl p-5">
@@ -253,7 +266,7 @@ export function PrivateDrawManager({ initialDraws }: { initialDraws: DrawItem[] 
                       disabled={busyId === draw.id}
                       onClick={() => toggleActive(draw)}
                     >
-                      {draw.isActive ? "DEACTIVATE" : "ACTIVATE"}
+                      {busyId === draw.id ? busyLabel : draw.isActive ? "DEACTIVATE" : "ACTIVATE"}
                     </button>
                   </div>
                 </div>

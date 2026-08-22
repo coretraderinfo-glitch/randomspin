@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Copy, ExternalLink, Plus, Save } from "lucide-react";
+import { SuccessBanner, normalizeFeedbackMessage } from "@/components/admin/feedback";
 
 type PlayerDrawItem = {
   id: string;
@@ -42,6 +43,16 @@ export function PlayerDrawManager({ initialDraws }: { initialDraws: PlayerDrawIt
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [busyLabel, setBusyLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setMessage(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
 
   async function copyLink(publicCode: string) {
     const origin = typeof window === "undefined" ? "" : window.location.origin;
@@ -87,11 +98,12 @@ export function PlayerDrawManager({ initialDraws }: { initialDraws: PlayerDrawIt
       },
       ...current
     ]);
-    setMessage(data.message ?? "Player draw created.");
+    setMessage(normalizeFeedbackMessage(data.message, "Player draw created successfully."));
   }
 
   async function toggleActive(draw: PlayerDrawItem) {
     setBusyId(draw.id);
+    setBusyLabel(draw.isActive ? "Deactivating..." : "Activating...");
     setMessage(null);
     setError(null);
 
@@ -111,6 +123,7 @@ export function PlayerDrawManager({ initialDraws }: { initialDraws: PlayerDrawIt
     const data = (await response.json()) as DrawResponse;
 
     setBusyId(null);
+    setBusyLabel(null);
 
     if (!response.ok || !data.draw) {
       setError(data.error ?? "Player draw could not be updated.");
@@ -118,7 +131,7 @@ export function PlayerDrawManager({ initialDraws }: { initialDraws: PlayerDrawIt
     }
 
     setDraws((current) => current.map((item) => (item.id === draw.id ? { ...item, isActive: !item.isActive } : item)));
-    setMessage(data.message ?? "Player draw updated.");
+    setMessage(draw.isActive ? "Player draw deactivated successfully." : "Player draw activated successfully.");
   }
 
   return (
@@ -159,10 +172,10 @@ export function PlayerDrawManager({ initialDraws }: { initialDraws: PlayerDrawIt
           onClick={createDraw}
         >
           <Save className="size-4" />
-          + CREATE PLAYER DRAW
+          {creating ? "Creating..." : "+ CREATE PLAYER DRAW"}
         </button>
         {error ? <p className="danger-banner mt-4 rounded-lg px-4 py-3 text-sm font-semibold">{error}</p> : null}
-        {message ? <p className="mt-4 rounded-lg border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">{message}</p> : null}
+        <SuccessBanner message={message} />
       </section>
 
       <section className="glass rounded-xl p-5">
@@ -205,7 +218,7 @@ export function PlayerDrawManager({ initialDraws }: { initialDraws: PlayerDrawIt
                       <ExternalLink className="size-4" />
                     </a>
                     <button className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-bold text-white hover:bg-white/12 disabled:opacity-60" type="button" disabled={busyId === draw.id} onClick={() => toggleActive(draw)}>
-                      {draw.isActive ? "DEACTIVATE" : "ACTIVATE"}
+                      {busyId === draw.id ? busyLabel : draw.isActive ? "DEACTIVATE" : "ACTIVATE"}
                     </button>
                   </div>
                 </div>

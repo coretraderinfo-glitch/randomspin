@@ -591,6 +591,46 @@ describe("public spin experience", () => {
     expect(screen.queryByText(/pendingOperatorWinner/i)).not.toBeInTheDocument();
   });
 
+  it("no-pending private operator fallback completes without an audience error", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          spinId: "spin-random-fallback",
+          winner: 11,
+          timestamp: "2026-08-19T09:45:11.000Z",
+          from: 1,
+          to: 66,
+          mode: "RANDOM",
+          nextLabel: "RANDOM DRAW"
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <PublicHome
+        settings={{ ...settings, defaultFrom: 1, defaultTo: 66, maximumAllowedRange: 1000 }}
+        initialResults={[]}
+        drawMode={{
+          kind: "private",
+          publicCode: "A7K29P",
+          label: "RANDOM DRAW",
+          spinEndpoint: "/api/draw/A7K29P/spin"
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    await completeSuccessfulSpin();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/draw/A7K29P/spin", expect.objectContaining({ method: "POST" }));
+    expectWinnerNumber(11);
+    expect(screen.getByText("RANDOM DRAW")).toBeInTheDocument();
+    expect(screen.queryByText("Unable to complete this spin. Please try again.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/pendingOperatorWinner/i)).not.toBeInTheDocument();
+  });
+
   it("does not show a three-number range error for valid private 1-66 draws", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
