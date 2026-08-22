@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createAdminSession, setAdminCookie, verifyAdminCredentials } from "@/lib/auth";
+import { logAdminAudit } from "@/lib/admin-audit";
+import { createAdminSession, createAdminTwoFactorChallenge, setAdminCookie, verifyAdminCredentials } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { rateLimit } from "@/lib/rate-limit";
-import { getClientIp, jsonError, requireSameOrigin } from "@/lib/security";
+import { getClientIp, jsonError, requireSameOrigin, sha256 } from "@/lib/security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,10 +34,28 @@ export async function POST(request: NextRequest) {
 
     const admin = await verifyAdminCredentials(parsed.data.email, parsed.data.password);
     if (!admin) {
+      await logAdminAudit({
+        action: "ADMIN_LOGIN_FAILED",
+        target: "AdminUser",
+        success: false,
+        request,
+        metadata: { emailHash: sha256(parsed.data.email.toLowerCase()) }
+      });
       return jsonError("Invalid email or password.", 401);
     }
 
+    if (admin.totpEnabled) {
+      const challenge = await createAdminTwoFactorChallenge(admin.id);
+      return NextResponse.json({ requiresTwoFactor: true, challengeToken: challenge.token });
+    }
+
     const { token, expiresAt } = await createAdminSession(admin.id);
+    await logAdminAudit({
+      adminUserId: admin.id,
+      action: "ADMIN_LOGIN_SUCCEEDED",
+      target: `AdminUser:${admin.id}`,
+      request
+    });
     const response = NextResponse.json({ ok: true });
     setAdminCookie(response, token, expiresAt);
     return response;

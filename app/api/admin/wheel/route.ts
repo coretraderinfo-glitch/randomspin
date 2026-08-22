@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { logAdminAudit } from "@/lib/admin-audit";
 import { getAdminFromRequest } from "@/lib/auth";
-import { serializeAuditMetadata } from "@/lib/audit-metadata";
 import { prisma } from "@/lib/db";
 import { normalizeExcludedNumbers, serializeExcludedNumbers } from "@/lib/excluded-numbers";
 import { jsonError, requireSameOrigin } from "@/lib/security";
@@ -89,21 +89,20 @@ export async function PUT(request: NextRequest) {
       }
     });
 
-    await prisma.auditLog.create({
-      data: {
-        adminUserId: admin.id,
-        action: "WHEEL_CONFIGURATION_UPDATED",
-        target: "WheelConfiguration",
-        metadata: serializeAuditMetadata({
-          previous: current
-            ? {
-                minNumber: current.minNumber,
-                maxNumber: current.maxNumber,
-                excludedNumbers: normalizeExcludedNumbers(current.excludedNumbers)
-              }
-            : null,
-          next: { minNumber, maxNumber, excludedNumbers }
-        })
+    await logAdminAudit({
+      adminUserId: admin.id,
+      action: "WHEEL_CONFIGURATION_UPDATED",
+      target: `WheelConfiguration:${updated.id}`,
+      request,
+      metadata: {
+        previous: current
+          ? {
+              minNumber: current.minNumber,
+              maxNumber: current.maxNumber,
+              excludedCount: normalizeExcludedNumbers(current.excludedNumbers).length
+            }
+          : null,
+        next: { minNumber, maxNumber, excludedCount: excludedNumbers.length }
       }
     });
 

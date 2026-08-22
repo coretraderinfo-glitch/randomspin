@@ -8,8 +8,16 @@ export function sanitizeUserAgent(userAgent: string | null) {
 }
 
 export function getClientIp(request: NextRequest) {
-  if (process.env.VERCEL || process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.TRUST_PROXY_HEADERS === "true") {
-    return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown";
+  if (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID) {
+    return request.headers.get("x-real-ip")?.trim() || "railway-unknown";
+  }
+
+  if (process.env.VERCEL) {
+    return request.headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "vercel-unknown";
+  }
+
+  if (process.env.TRUST_PROXY_HEADERS === "true") {
+    return request.headers.get("x-real-ip")?.trim() || request.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim() || "trusted-proxy-unknown";
   }
 
   return "local-development";

@@ -41,10 +41,17 @@ function applySecurityHeaders(response: NextResponse, nonce: string) {
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
+  if (!isDevelopment && siteUrl.startsWith("https://")) {
+    response.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
   if (noindexPublicDeployment) {
     response.headers.set("X-Robots-Tag", "noindex, nofollow");
   }
   return response;
+}
+
+function notFoundResponse(nonce: string) {
+  return applySecurityHeaders(new NextResponse("Not Found", { status: 404 }), nonce);
 }
 
 export function proxy(request: NextRequest) {
@@ -56,11 +63,15 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hasSessionCookie = Boolean(request.cookies.get(ADMIN_SESSION_COOKIE)?.value);
 
-  if (pathname.startsWith("/admin") && pathname !== "/admin/login" && !hasSessionCookie) {
-    return applySecurityHeaders(NextResponse.redirect(new URL("/admin/login", request.url)), nonce);
+  if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+    return notFoundResponse(nonce);
   }
 
-  if (pathname.startsWith("/api/admin") && pathname !== "/api/admin/login" && !hasSessionCookie) {
+  if (pathname.startsWith("/rs-console") && pathname !== "/rs-console/login" && !hasSessionCookie) {
+    return applySecurityHeaders(NextResponse.redirect(new URL("/rs-console/login", request.url)), nonce);
+  }
+
+  if (pathname.startsWith("/api/admin") && pathname !== "/api/admin/login" && pathname !== "/api/admin/login/totp" && !hasSessionCookie) {
     return applySecurityHeaders(NextResponse.json({ error: "Unauthorized." }, { status: 401 }), nonce);
   }
 

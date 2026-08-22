@@ -308,10 +308,10 @@ export function PlayerDrawManager({ initialDraws }: { initialDraws: PlayerDrawIt
                       </>
                     ) : (
                       <>
-                        <a className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-bold text-white hover:bg-white/12" href={`/admin/player-draws/${draw.id}`}>
+                        <a className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-bold text-white hover:bg-white/12" href={`/rs-console/player-draws/${draw.id}`}>
                           OPEN
                         </a>
-                        <a className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-bold text-white hover:bg-white/12" href={`/admin/player-draws/${draw.id}`}>
+                        <a className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-bold text-white hover:bg-white/12" href={`/rs-console/player-draws/${draw.id}`}>
                           EDIT
                         </a>
                         {draw.isActive ? (

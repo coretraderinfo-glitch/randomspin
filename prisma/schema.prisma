@@ -9,15 +9,22 @@ datasource db {
 }
 
 model AdminUser {
-  id           String         @id @default(uuid())
-  email        String         @unique
-  passwordHash String
-  role         String         @default("OWNER")
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  lastLoginAt  DateTime?
-  sessions     AdminSession[]
-  auditLogs    AuditLog[]
+  id                       String                    @id @default(uuid())
+  email                    String                    @unique
+  passwordHash             String
+  role                     String                    @default("OWNER")
+  totpEnabled              Boolean                   @default(false)
+  totpSecretEncrypted      String?
+  totpSetupSecretEncrypted String?
+  totpSetupStartedAt       DateTime?
+  totpVerifiedAt           DateTime?
+  totpLastUsedStep         Int?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  lastLoginAt              DateTime?
+  sessions                 AdminSession[]
+  twoFactorChallenges      AdminTwoFactorChallenge[]
+  auditLogs                AuditLog[]
 }
 
 model AdminSession {
@@ -28,6 +35,19 @@ model AdminSession {
   expiresAt   DateTime
   createdAt   DateTime  @default(now())
   revokedAt   DateTime?
+
+  @@index([adminUserId])
+  @@index([expiresAt])
+}
+
+model AdminTwoFactorChallenge {
+  id          String    @id @default(uuid())
+  tokenHash   String    @unique
+  adminUserId String
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  usedAt      DateTime?
 
   @@index([adminUserId])
   @@index([expiresAt])
@@ -182,14 +202,17 @@ model SiteSettings {
 }
 
 model AuditLog {
-  id          String     @id @default(uuid())
-  adminUserId String?
-  adminUser   AdminUser? @relation(fields: [adminUserId], references: [id], onDelete: SetNull)
-  action      String
-  target      String
-  metadata    Json?
-  createdAt   DateTime   @default(now())
+  id           String     @id @default(uuid())
+  adminUserId  String?
+  adminUser    AdminUser? @relation(fields: [adminUserId], references: [id], onDelete: SetNull)
+  action       String
+  target       String
+  success      Boolean    @default(true)
+  clientIpHash String?
+  metadata     Json?
+  createdAt    DateTime   @default(now())
 
   @@index([createdAt])
   @@index([adminUserId])
+  @@index([action])
 }

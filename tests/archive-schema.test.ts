@@ -22,4 +22,24 @@ describe("draw archive and delete schema safety", () => {
     expect(schema).toContain("playerDraw          PlayerDraw         @relation(fields: [playerDrawId], references: [id], onDelete: Cascade)");
     expect(schema).toContain("participant         PlayerParticipant? @relation(fields: [participantId], references: [id], onDelete: SetNull)");
   });
+
+  it("keeps additive audit log fields for production security review", () => {
+    const schema = fs.readFileSync(path.join(process.cwd(), "prisma/schema.prisma"), "utf8");
+
+    expect(schema).toContain("model AuditLog");
+    expect(schema).toContain("success      Boolean    @default(true)");
+    expect(schema).toContain("clientIpHash String?");
+    expect(schema).toContain("@@index([action])");
+  });
+
+  it("keeps additive admin TOTP fields and challenge table", () => {
+    const schema = fs.readFileSync(path.join(process.cwd(), "prisma/schema.prisma"), "utf8");
+
+    expect(schema).toContain("totpEnabled              Boolean                   @default(false)");
+    expect(schema).toContain("totpSecretEncrypted      String?");
+    expect(schema).toContain("totpSetupSecretEncrypted String?");
+    expect(schema).toContain("totpLastUsedStep         Int?");
+    expect(schema).toContain("model AdminTwoFactorChallenge");
+    expect(schema).toContain("tokenHash   String    @unique");
+  });
 });

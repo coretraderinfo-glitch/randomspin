@@ -7,12 +7,34 @@ import { createOpaqueToken, sha256 } from "@/lib/security";
 
 export const ADMIN_SESSION_COOKIE = "lucky_admin_session";
 const SESSION_DAYS = 7;
+const TWO_FACTOR_CHALLENGE_MINUTES = 5;
 
 export async function createAdminSession(adminUserId: string) {
   const token = createOpaqueToken();
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
 
-  await prisma.adminSession.create({
+  await prisma.$transaction([
+    prisma.adminSession.create({
+      data: {
+        tokenHash: sha256(token),
+        adminUserId,
+        expiresAt
+      }
+    }),
+    prisma.adminUser.update({
+      where: { id: adminUserId },
+      data: { lastLoginAt: new Date() }
+    })
+  ]);
+
+  return { token, expiresAt };
+}
+
+export async function createAdminTwoFactorChallenge(adminUserId: string) {
+  const token = createOpaqueToken();
+  const expiresAt = new Date(Date.now() + TWO_FACTOR_CHALLENGE_MINUTES * 60 * 1000);
+
+  await prisma.adminTwoFactorChallenge.create({
     data: {
       tokenHash: sha256(token),
       adminUserId,
@@ -21,6 +43,24 @@ export async function createAdminSession(adminUserId: string) {
   });
 
   return { token, expiresAt };
+}
+
+export async function getAdminTwoFactorChallenge(token: string) {
+  return prisma.adminTwoFactorChallenge.findFirst({
+    where: {
+      tokenHash: sha256(token),
+      usedAt: null,
+      expiresAt: { gt: new Date() }
+    },
+    include: { adminUser: true }
+  });
+}
+
+export async function markAdminTwoFactorChallengeUsed(id: string) {
+  return prisma.adminTwoFactorChallenge.updateMany({
+    where: { id, usedAt: null, expiresAt: { gt: new Date() } },
+    data: { usedAt: new Date() }
+  });
 }
 
 export function setAdminCookie(response: NextResponse, token: string, expiresAt: Date) {
@@ -89,6 +129,13 @@ export async function revokeCurrentSession(request: NextRequest) {
   });
 }
 
+export async function revokeAllAdminSessions(adminUserId: string) {
+  return prisma.adminSession.updateMany({
+    where: { adminUserId, revokedAt: null },
+    data: { revokedAt: new Date() }
+  });
+}
+
 export async function verifyAdminCredentials(email: string, password: string) {
   const admin = await prisma.adminUser.findUnique({
     where: { email: email.toLowerCase() }
@@ -102,11 +149,6 @@ export async function verifyAdminCredentials(email: string, password: string) {
   if (!valid) {
     return null;
   }
-
-  await prisma.adminUser.update({
-    where: { id: admin.id },
-    data: { lastLoginAt: new Date() }
-  });
 
   return admin;
 }

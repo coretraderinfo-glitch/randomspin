@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { logAdminAudit } from "@/lib/admin-audit";
 import { getAdminFromRequest } from "@/lib/auth";
 import {
   PLAYER_DRAW_OPERATOR_MODE,
@@ -78,12 +79,30 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     const { id } = await params;
+    const previous = await getPlayerDrawForAdmin(id);
     const draw = await updatePlayerDraw({
       id,
       input: {
         ...parsed.data,
         mode: parsed.data.mode as PlayerDrawMode,
         clearPendingWinner: parsed.data.action === "clear"
+      }
+    });
+
+    await logAdminAudit({
+      adminUserId: admin.id,
+      action: "PLAYER_DRAW_UPDATED",
+      target: `PlayerDraw:${draw.id}`,
+      request,
+      metadata: {
+        modeChanged: previous ? previous.mode !== draw.mode : null,
+        activationChanged: previous ? previous.isActive !== draw.isActive : null,
+        participantsUpdated: parsed.data.participants !== undefined,
+        participantCount: parsed.data.participants?.length ?? previous?.participantCount ?? null,
+        nextWinnerAction: parsed.data.action === "clear" ? "clear" : parsed.data.nextWinnerParticipantId ? "set" : null,
+        removeWinnerAfterWinChanged: previous ? previous.removeWinnerAfterWin !== draw.removeWinnerAfterWin : null,
+        showParticipantListChanged: previous ? previous.showParticipantList !== draw.showParticipantList : null,
+        showReferencesPubliclyChanged: previous ? previous.showReferencesPublicly !== draw.showReferencesPublicly : null
       }
     });
 
@@ -121,6 +140,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const { id } = await params;
     const draw = parsed.data.action === "archive" ? await archivePlayerDraw(id) : await restorePlayerDraw(id);
 
+    await logAdminAudit({
+      adminUserId: admin.id,
+      action: parsed.data.action === "archive" ? "PLAYER_DRAW_ARCHIVED" : "PLAYER_DRAW_RESTORED",
+      target: `PlayerDraw:${draw.id}`,
+      request
+    });
+
     return NextResponse.json({
       draw,
       message: parsed.data.action === "archive" ? "Player draw archived successfully." : "Player draw restored successfully."
@@ -157,6 +183,13 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
     const { id } = await params;
     await deletePlayerDrawPermanently(id);
+
+    await logAdminAudit({
+      adminUserId: admin.id,
+      action: "PLAYER_DRAW_DELETED",
+      target: `PlayerDraw:${id}`,
+      request
+    });
 
     return NextResponse.json({ deletedId: id, message: "Player draw permanently deleted." });
   } catch (error) {

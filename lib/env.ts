@@ -16,8 +16,10 @@ const envSchema = z.object({
   NEXT_PUBLIC_SITE_URL: optionalUrl,
   UPSTASH_REDIS_REST_URL: optionalUrl,
   UPSTASH_REDIS_REST_TOKEN: optionalNonEmptyString,
+  ADMIN_TOTP_ENCRYPTION_KEY: optionalNonEmptyString,
   SPIN_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(40),
-  ADMIN_LOGIN_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(8)
+  ADMIN_LOGIN_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(8),
+  ADMIN_TOTP_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(6)
 });
 
 export const env = envSchema.parse(process.env);
@@ -45,6 +47,15 @@ export function getSessionSecret() {
   }
 
   return env.NEXTAUTH_SECRET ?? "development-only-secret-change-before-production-32";
+}
+
+export function getAdminTotpEncryptionKey() {
+  const key = process.env.ADMIN_TOTP_ENCRYPTION_KEY;
+  if (!key) {
+    throw new Error("ADMIN_TOTP_ENCRYPTION_KEY is required before enabling or using admin TOTP 2FA.");
+  }
+
+  return key;
 }
 
 export function getSiteUrl() {

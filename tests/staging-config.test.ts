@@ -28,21 +28,29 @@ describe("staging configuration safety", () => {
     expect(envSource).toContain("postgres(?:ql)?");
   });
 
-  it("keeps staging and preview deployments out of search indexes", () => {
+  it("keeps staging and preview deployments out of search indexes", async () => {
     const robots = readFileSync(path.join(root, "app/robots.ts"), "utf8");
     const layout = readFileSync(path.join(root, "app/layout.tsx"), "utf8");
+    const rsConsoleLayout = readFileSync(path.join(root, "app/(admin)/rs-console/layout.tsx"), "utf8");
     const proxy = readFileSync(path.join(root, "proxy.ts"), "utf8");
     const envSource = readFileSync(path.join(root, "lib/env.ts"), "utf8");
+    const { default: robotsConfig } = await import("@/app/robots");
 
     expect(envSource).toContain('env.APP_ENV === "staging"');
     expect(envSource).toContain('siteHostname.endsWith(".up.railway.app")');
     expect(robots).toContain("isPublicIndexingDisabled");
     expect(robots).toContain('disallow: "/"');
+    expect(robots).not.toContain('"/rs-console/"');
+    expect(JSON.stringify(robotsConfig())).not.toContain("/rs-console");
     expect(robots).toContain('"/draw/"');
     expect(robots).toContain('"/live/"');
     expect(robots).toContain('"/players/"');
     expect(layout).toContain("index: !isPublicIndexingDisabled()");
+    expect(rsConsoleLayout).toContain("robots");
+    expect(rsConsoleLayout).toContain("index: false");
+    expect(rsConsoleLayout).toContain("follow: false");
     expect(proxy).toContain("X-Robots-Tag");
     expect(proxy).toContain("noindex, nofollow");
+    expect(proxy).toContain("Strict-Transport-Security");
   });
 });

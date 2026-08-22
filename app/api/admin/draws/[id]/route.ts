@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { logAdminAudit } from "@/lib/admin-audit";
 import { getAdminFromRequest } from "@/lib/auth";
 import {
   PRIVATE_DRAW_CARD_REVEAL_DISPLAY,
@@ -53,6 +54,10 @@ const deleteConfirmationSchema = z.object({
   confirmation: z.literal("PERMANENTLY DELETE")
 });
 
+function sameNumbers(left: number[], right: number[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const admin = await getAdminFromRequest(request);
   if (!admin) {
@@ -86,6 +91,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     const { id } = await params;
+    const previous = await getPrivateDrawForAdmin(id);
     const result = await updatePrivateDraw({
       id,
       input: {
@@ -105,6 +111,23 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     const message = result.pendingWinnerCleared
       ? "Draw settings saved. Pending operator winner was cleared because it is no longer valid."
       : "Draw settings saved.";
+
+    await logAdminAudit({
+      adminUserId: admin.id,
+      action: "PRIVATE_DRAW_UPDATED",
+      target: `PrivateDraw:${result.draw.id}`,
+      request,
+      metadata: {
+        modeChanged: previous ? previous.mode !== result.draw.mode : null,
+        rangeChanged: previous ? previous.minNumber !== result.draw.minNumber || previous.maxNumber !== result.draw.maxNumber : null,
+        exclusionsChanged: previous ? !sameNumbers(previous.excludedNumbers, result.draw.excludedNumbers) : null,
+        activationChanged: previous ? previous.isActive !== result.draw.isActive : null,
+        displayStyleChanged: previous ? previous.displayStyle !== result.draw.displayStyle : null,
+        liveSlugChanged: previous ? previous.liveSlug !== result.draw.liveSlug : null,
+        nextWinnerAction: parsed.data.action ?? (parsed.data.nextWinner !== undefined ? "set" : null),
+        pendingWinnerCleared: result.pendingWinnerCleared
+      }
+    });
 
     return NextResponse.json({ draw: result.draw, message });
   } catch (error) {
@@ -143,6 +166,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     const { id } = await params;
     const draw = parsed.data.action === "archive" ? await archivePrivateDraw(id) : await restorePrivateDraw(id);
+
+    await logAdminAudit({
+      adminUserId: admin.id,
+      action: parsed.data.action === "archive" ? "PRIVATE_DRAW_ARCHIVED" : "PRIVATE_DRAW_RESTORED",
+      target: `PrivateDraw:${draw.id}`,
+      request
+    });
 
     return NextResponse.json({
       draw,
@@ -184,6 +214,13 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
     const { id } = await params;
     await deletePrivateDrawPermanently(id);
+
+    await logAdminAudit({
+      adminUserId: admin.id,
+      action: "PRIVATE_DRAW_DELETED",
+      target: `PrivateDraw:${id}`,
+      request
+    });
 
     return NextResponse.json({ deletedId: id, message: "Draw permanently deleted." });
   } catch (error) {

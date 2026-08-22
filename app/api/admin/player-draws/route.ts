@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { logAdminAudit } from "@/lib/admin-audit";
 import { getAdminFromRequest } from "@/lib/auth";
 import {
   PLAYER_DRAW_OPERATOR_MODE,
@@ -59,6 +60,21 @@ export async function POST(request: NextRequest) {
     const draw = await createPlayerDraw({
       ...parsed.data,
       mode: parsed.data.mode as PlayerDrawMode
+    });
+
+    await logAdminAudit({
+      adminUserId: admin.id,
+      action: "PLAYER_DRAW_CREATED",
+      target: `PlayerDraw:${draw.id}`,
+      request,
+      metadata: {
+        mode: draw.mode,
+        isActive: draw.isActive,
+        participantCount: parsed.data.participants.length,
+        removeWinnerAfterWin: draw.removeWinnerAfterWin,
+        showParticipantList: draw.showParticipantList,
+        showReferencesPublicly: draw.showReferencesPublicly
+      }
     });
 
     return NextResponse.json({ draw, message: "Player draw created successfully." }, { status: 201 });

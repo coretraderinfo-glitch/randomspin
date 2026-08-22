@@ -18,6 +18,12 @@ CREATE TABLE IF NOT EXISTS "AdminUser" (
   "email" TEXT NOT NULL UNIQUE,
   "passwordHash" TEXT NOT NULL,
   "role" TEXT NOT NULL DEFAULT 'OWNER',
+  "totpEnabled" BOOLEAN NOT NULL DEFAULT false,
+  "totpSecretEncrypted" TEXT,
+  "totpSetupSecretEncrypted" TEXT,
+  "totpSetupStartedAt" DATETIME,
+  "totpVerifiedAt" DATETIME,
+  "totpLastUsedStep" INTEGER,
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "lastLoginAt" DATETIME
@@ -31,6 +37,17 @@ CREATE TABLE IF NOT EXISTS "AdminSession" (
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "revokedAt" DATETIME,
   CONSTRAINT "AdminSession_adminUserId_fkey"
+    FOREIGN KEY ("adminUserId") REFERENCES "AdminUser" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS "AdminTwoFactorChallenge" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "tokenHash" TEXT NOT NULL UNIQUE,
+  "adminUserId" TEXT NOT NULL,
+  "expiresAt" DATETIME NOT NULL,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "usedAt" DATETIME,
+  CONSTRAINT "AdminTwoFactorChallenge_adminUserId_fkey"
     FOREIGN KEY ("adminUserId") REFERENCES "AdminUser" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
@@ -159,6 +176,8 @@ CREATE TABLE IF NOT EXISTS "AuditLog" (
   "adminUserId" TEXT,
   "action" TEXT NOT NULL,
   "target" TEXT NOT NULL,
+  "success" BOOLEAN NOT NULL DEFAULT true,
+  "clientIpHash" TEXT,
   "metadata" TEXT,
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "AuditLog_adminUserId_fkey"
@@ -167,6 +186,8 @@ CREATE TABLE IF NOT EXISTS "AuditLog" (
 
 CREATE INDEX IF NOT EXISTS "AdminSession_adminUserId_idx" ON "AdminSession" ("adminUserId");
 CREATE INDEX IF NOT EXISTS "AdminSession_expiresAt_idx" ON "AdminSession" ("expiresAt");
+CREATE INDEX IF NOT EXISTS "AdminTwoFactorChallenge_adminUserId_idx" ON "AdminTwoFactorChallenge" ("adminUserId");
+CREATE INDEX IF NOT EXISTS "AdminTwoFactorChallenge_expiresAt_idx" ON "AdminTwoFactorChallenge" ("expiresAt");
 CREATE INDEX IF NOT EXISTS "PrivateDraw_publicCode_idx" ON "PrivateDraw" ("publicCode");
 CREATE INDEX IF NOT EXISTS "PrivateDraw_isActive_idx" ON "PrivateDraw" ("isActive");
 CREATE INDEX IF NOT EXISTS "SpinResult_createdAt_idx" ON "SpinResult" ("createdAt");
@@ -185,6 +206,7 @@ CREATE INDEX IF NOT EXISTS "PlayerDrawResult_participantId_idx" ON "PlayerDrawRe
 CREATE INDEX IF NOT EXISTS "PlayerDrawResult_createdAt_idx" ON "PlayerDrawResult" ("createdAt");
 CREATE INDEX IF NOT EXISTS "AuditLog_createdAt_idx" ON "AuditLog" ("createdAt");
 CREATE INDEX IF NOT EXISTS "AuditLog_adminUserId_idx" ON "AuditLog" ("adminUserId");
+CREATE INDEX IF NOT EXISTS "AuditLog_action_idx" ON "AuditLog" ("action");
 `);
 
 function ensureColumn(table, column, definition) {
@@ -194,16 +216,27 @@ function ensureColumn(table, column, definition) {
   }
 }
 
+ensureColumn("AdminUser", "totpEnabled", "BOOLEAN NOT NULL DEFAULT false");
+ensureColumn("AdminUser", "totpSecretEncrypted", "TEXT");
+ensureColumn("AdminUser", "totpSetupSecretEncrypted", "TEXT");
+ensureColumn("AdminUser", "totpSetupStartedAt", "DATETIME");
+ensureColumn("AdminUser", "totpVerifiedAt", "DATETIME");
+ensureColumn("AdminUser", "totpLastUsedStep", "INTEGER");
 ensureColumn("PrivateDraw", "displayStyle", "TEXT NOT NULL DEFAULT 'WHEEL'");
 ensureColumn("PrivateDraw", "archivedAt", "DATETIME");
 ensureColumn("PrivateDraw", "liveSlug", "TEXT");
 ensureColumn("PlayerDraw", "archivedAt", "DATETIME");
+ensureColumn("AuditLog", "success", "BOOLEAN NOT NULL DEFAULT true");
+ensureColumn("AuditLog", "clientIpHash", "TEXT");
 
 db.exec(`
+CREATE INDEX IF NOT EXISTS "AdminTwoFactorChallenge_adminUserId_idx" ON "AdminTwoFactorChallenge" ("adminUserId");
+CREATE INDEX IF NOT EXISTS "AdminTwoFactorChallenge_expiresAt_idx" ON "AdminTwoFactorChallenge" ("expiresAt");
 CREATE INDEX IF NOT EXISTS "PrivateDraw_archivedAt_idx" ON "PrivateDraw" ("archivedAt");
 CREATE UNIQUE INDEX IF NOT EXISTS "PrivateDraw_liveSlug_key" ON "PrivateDraw" ("liveSlug");
 CREATE INDEX IF NOT EXISTS "PrivateDraw_liveSlug_idx" ON "PrivateDraw" ("liveSlug");
 CREATE INDEX IF NOT EXISTS "PlayerDraw_archivedAt_idx" ON "PlayerDraw" ("archivedAt");
+CREATE INDEX IF NOT EXISTS "AuditLog_action_idx" ON "AuditLog" ("action");
 `);
 
 db.prepare(`

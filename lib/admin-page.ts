@@ -5,7 +5,7 @@ import { getCurrentAdmin } from "@/lib/auth";
 export async function requireAdminPage() {
   const session = await getCurrentAdmin();
   if (!session) {
-    redirect("/admin/login");
+    redirect("/rs-console/login");
   }
 
   return session.adminUser;

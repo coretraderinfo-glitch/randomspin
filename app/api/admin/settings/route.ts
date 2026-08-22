@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { logAdminAudit } from "@/lib/admin-audit";
 import { getAdminFromRequest } from "@/lib/auth";
-import { serializeAuditMetadata } from "@/lib/audit-metadata";
 import { prisma } from "@/lib/db";
 import { jsonError, requireSameOrigin } from "@/lib/security";
 import { isValidTimeZone } from "@/lib/timezone";
@@ -75,13 +75,12 @@ export async function PUT(request: NextRequest) {
     data: parsed.data
   });
 
-  await prisma.auditLog.create({
-    data: {
-      adminUserId: admin.id,
-      action: "SITE_SETTINGS_UPDATED",
-      target: "SiteSettings",
-      metadata: serializeAuditMetadata({ previous, next: settings })
-    }
+  await logAdminAudit({
+    adminUserId: admin.id,
+    action: "SITE_SETTINGS_UPDATED",
+    target: "SiteSettings:default",
+    request,
+    metadata: { previous, next: settings }
   });
 
   return NextResponse.json({ settings, message: "Website settings saved." });

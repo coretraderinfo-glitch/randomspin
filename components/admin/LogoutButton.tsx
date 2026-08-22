@@ -7,7 +7,7 @@ export function LogoutButton({ icon }: { icon: React.ReactNode }) {
 
   async function logout() {
     await fetch("/api/admin/logout", { method: "POST" });
-    router.push("/admin/login");
+    router.push("/rs-console/login");
     router.refresh();
   }
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { logAdminAudit } from "@/lib/admin-audit";
 import { getAdminFromRequest } from "@/lib/auth";
 import {
   PRIVATE_DRAW_CARD_REVEAL_DISPLAY,
@@ -72,6 +73,21 @@ export async function POST(request: NextRequest) {
       displayStyle: parsed.data.displayStyle,
       isActive: parsed.data.isActive,
       nextWinner: parsed.data.nextWinner
+    });
+
+    await logAdminAudit({
+      adminUserId: admin.id,
+      action: "PRIVATE_DRAW_CREATED",
+      target: `PrivateDraw:${draw.id}`,
+      request,
+      metadata: {
+        mode: draw.mode,
+        range: { minNumber: draw.minNumber, maxNumber: draw.maxNumber },
+        excludedCount: draw.excludedNumbers.length,
+        isActive: draw.isActive,
+        liveSlugSet: Boolean(draw.liveSlug),
+        nextWinnerConfigured: parsed.data.nextWinner !== undefined && parsed.data.nextWinner !== null
+      }
     });
 
     return NextResponse.json({ draw, message: "Private draw created successfully." }, { status: 201 });

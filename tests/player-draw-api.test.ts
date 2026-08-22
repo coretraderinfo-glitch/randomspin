@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   playerParticipantCreateMany: vi.fn(),
   playerParticipantUpdate: vi.fn(),
   playerDrawResultCreate: vi.fn(),
+  auditCreate: vi.fn(),
   transaction: vi.fn()
 }));
 
@@ -41,6 +42,7 @@ vi.mock("@/lib/db", () => ({
       update: mocks.playerParticipantUpdate
     },
     playerDrawResult: { create: mocks.playerDrawResultCreate },
+    auditLog: { create: mocks.auditCreate },
     $transaction: mocks.transaction
   }
 }));
@@ -152,6 +154,7 @@ describe("RandomSpin Player Draw APIs", () => {
     mocks.playerParticipantDeleteMany.mockResolvedValue({ count: 0 });
     mocks.playerParticipantCreateMany.mockResolvedValue({ count: 0 });
     mocks.playerParticipantUpdate.mockResolvedValue({ ...participants[1], isEligible: false });
+    mocks.auditCreate.mockResolvedValue({});
     mocks.playerDrawResultCreate.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
       id: "player-result-1",
       ...data,
@@ -214,6 +217,11 @@ describe("RandomSpin Player Draw APIs", () => {
 
     expect(response.status).toBe(200);
     expect(body.draw.pendingOperatorParticipantId).toBe("participant-sarah");
+    expect(mocks.auditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ action: "PLAYER_DRAW_UPDATED", adminUserId: "admin-1", success: true })
+      })
+    );
     expect(mocks.playerParticipantFindFirst).toHaveBeenCalledWith({
       where: { id: "participant-sarah", playerDrawId: "player-draw-1", isEligible: true }
     });

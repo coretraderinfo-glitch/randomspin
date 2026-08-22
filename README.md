@@ -73,7 +73,7 @@ The production schema remains `prisma/schema.prisma` with PostgreSQL. Production
 Go to:
 
 ```text
-http://localhost:3000/admin/login
+http://localhost:3000/rs-console/login
 ```
 
 Use the email and password from:
@@ -85,10 +85,20 @@ ADMIN_BOOTSTRAP_PASSWORD
 
 Never commit real credentials into the project.
 
+## Admin Two-Factor Authentication
+
+Admin TOTP secrets are encrypted before database storage. Set a unique encryption key per environment before enabling 2FA:
+
+```bash
+openssl rand -base64 32
+```
+
+Store the result as `ADMIN_TOTP_ENCRYPTION_KEY` in the local or hosted environment. Recovery codes are intentionally not implemented; if an authenticator is lost, recover through controlled database/operator access and rotate the admin password.
+
 ## Change Eligible / Excluded Numbers
 
-1. Log in at `/admin/login`.
-2. Open `/admin/wheel`.
+1. Log in at `/rs-console/login`.
+2. Open `/rs-console/wheel`.
 3. Set the active `FROM` and `TO` range.
 4. Click number tiles to mark them eligible or excluded.
 5. Press `Save Changes`.
@@ -104,7 +114,7 @@ Both modes should reuse the shared public presentation layer, especially `Public
 - `/` is public mode and uses the complete user-selected range with no private draw exclusions.
 - `/draw/[publicCode]` is audience mode and should resolve the draw context server-side from the public code.
 - Audience pages may show a small neutral label such as `PRIVATE EVENT DRAW`, but should not expose admin controls, exact exclusions, or technical identifiers.
-- Operator/admin draw controls belong on authenticated admin routes such as `/admin/draws/[id]`, not on the audience page.
+- Operator/admin draw controls belong on authenticated console routes such as `/rs-console/draws/[id]`, not on the audience page.
 - Private draw winners, wheel landing, winner modal, and history must all come from the same server result context for that draw.
 - Private draw modes are stored as strings for PostgreSQL and SQLite development compatibility, with allowed values validated centrally in `lib/private-draws.ts`.
 - View switching is presentation-only. Viewers can choose `Wheel` or `Number` on the public page without changing the server spin endpoint, eligible pool, exclusions, operator mode, or winner authority.

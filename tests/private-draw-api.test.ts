@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   privateDrawUpdateMany: vi.fn(),
   privateDrawDelete: vi.fn(),
   privateDrawSpinCreate: vi.fn(),
+  auditCreate: vi.fn(),
   transaction: vi.fn()
 }));
 
@@ -30,6 +31,7 @@ vi.mock("@/lib/db", () => ({
       delete: mocks.privateDrawDelete
     },
     privateDrawSpinResult: { create: mocks.privateDrawSpinCreate },
+    auditLog: { create: mocks.auditCreate },
     $transaction: mocks.transaction
   }
 }));
@@ -69,6 +71,7 @@ describe("private draw operator mode APIs", () => {
     mocks.privateDrawUpdate.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ ...baseDraw, ...data }));
     mocks.privateDrawUpdateMany.mockResolvedValue({ count: 1 });
     mocks.privateDrawDelete.mockResolvedValue(baseDraw);
+    mocks.auditCreate.mockResolvedValue({});
     mocks.privateDrawSpinCreate.mockResolvedValue({
       id: "draw-spin-1",
       winningNumber: 7,
@@ -136,6 +139,11 @@ describe("private draw operator mode APIs", () => {
 
     expect(response.status).toBe(200);
     expect(body.draw.pendingOperatorWinner).toBe(20);
+    expect(mocks.auditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ action: "PRIVATE_DRAW_UPDATED", adminUserId: "admin-1", success: true })
+      })
+    );
     expect(mocks.privateDrawUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ mode: "OPERATOR", pendingOperatorWinner: 20 })

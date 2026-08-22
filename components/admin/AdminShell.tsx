@@ -1,15 +1,17 @@
-import { BarChart3, History, LayoutDashboard, LogOut, Settings, SlidersHorizontal, Ticket, Users } from "lucide-react";
+import { BarChart3, History, LayoutDashboard, Lock, LogOut, Settings, SlidersHorizontal, Ticket, Users } from "lucide-react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { LogoutButton } from "@/components/admin/LogoutButton";
+import { RevokeAllSessionsButton } from "@/components/admin/RevokeAllSessionsButton";
 
 const navItems = [
-  { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/wheel", label: "Wheel Control", icon: SlidersHorizontal },
-  { href: "/admin/draws", label: "Private Draws", icon: Ticket },
-  { href: "/admin/player-draws", label: "Player Draws", icon: Users },
-  { href: "/admin/history", label: "Spin History", icon: History },
-  { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/admin/settings", label: "Website Settings", icon: Settings }
+  { href: "/rs-console/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/rs-console/wheel", label: "Wheel Control", icon: SlidersHorizontal },
+  { href: "/rs-console/draws", label: "Private Draws", icon: Ticket },
+  { href: "/rs-console/player-draws", label: "Player Draws", icon: Users },
+  { href: "/rs-console/history", label: "Spin History", icon: History },
+  { href: "/rs-console/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/rs-console/security", label: "Security", icon: Lock },
+  { href: "/rs-console/settings", label: "Website Settings", icon: Settings }
 ];
 
 export function AdminShell({ children, title }: { children: React.ReactNode; title: string }) {
@@ -32,6 +34,7 @@ export function AdminShell({ children, title }: { children: React.ReactNode; tit
           </nav>
           <div className="mt-8 border-t border-white/10 pt-4">
             <LogoutButton icon={<LogOut className="size-4" />} />
+            <RevokeAllSessionsButton icon={<LogOut className="size-4" />} />
           </div>
         </aside>
 
