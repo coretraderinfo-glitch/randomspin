@@ -199,6 +199,50 @@ describe("public spin experience", () => {
     expect(screen.getByRole("spinbutton", { name: "To" })).toHaveValue(25);
   });
 
+  it("public wheel can land on 24 for a visible 1-30 range", async () => {
+    const fetchMock = mockSpinResponses(24);
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PublicHome settings={settings} initialResults={[]} />);
+
+    expect(screen.getByRole("spinbutton", { name: "From" })).toHaveValue(1);
+    expect(screen.getByRole("spinbutton", { name: "To" })).toHaveValue(30);
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    await completeSuccessfulSpin();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/spin",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ from: 1, to: 30 })
+      })
+    );
+    expectWinnerNumber(24);
+    expect(screen.getByTestId("winning-segment")).toHaveAttribute("data-winning-number", "24");
+    expect(screen.getByText("1–30")).toBeInTheDocument();
+  });
+
+  it("public number roller can reveal 24 for a visible 1-30 range", async () => {
+    const fetchMock = mockSpinResponses(24);
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PublicHome settings={settings} initialResults={[]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Number" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    await completeSuccessfulSpin();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/spin",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ from: 1, to: 30 })
+      })
+    );
+    expect(screen.getByTestId("number-roller-value")).toHaveTextContent("24");
+    expectWinnerNumber(24);
+  });
+
   it("renders winner metadata from the supplied server result", () => {
     render(
       <WinnerModal
@@ -1073,6 +1117,14 @@ describe("public spin experience", () => {
     expect(publicHomeSource.match(/async function spin/g)?.length).toBe(1);
     expect(publicHomeSource).toContain('fetch(spinEndpoint');
     expect(publicHomeSource).toContain("showNumberRoller");
+  });
+
+  it("public homepage does not read private draw state", () => {
+    const pageSource = fs.readFileSync(path.join(process.cwd(), "app/page.tsx"), "utf8");
+
+    expect(pageSource).not.toContain("getPrivateDrawAudience");
+    expect(pageSource).not.toContain("PrivateDraw");
+    expect(pageSource).not.toContain("/api/draw/");
   });
 
   it("renders the view selector in a mobile-width structure without duplicating the visual area", () => {

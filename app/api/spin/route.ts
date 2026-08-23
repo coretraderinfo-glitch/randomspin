@@ -33,17 +33,21 @@ export async function POST(request: NextRequest) {
     }
 
     const selection = selectSecureWinner(parsed.data.from, parsed.data.to, {
-      configMin: config.minNumber,
-      configMax: config.maxNumber,
-      excludedNumbers: config.excludedNumbers,
+      configMin: parsed.data.from,
+      configMax: parsed.data.to,
+      excludedNumbers: [],
       maximumAllowedRange: settings.maximumAllowedRange
     });
 
     if (!isDatabaseConfigured()) {
+      const timestamp = new Date().toISOString();
       return NextResponse.json({
         spinId: `local-${randomUUID()}`,
         winner: selection.winner,
-        timestamp: new Date().toISOString()
+        from: selection.requestedMin,
+        to: selection.requestedMax,
+        timestamp,
+        serverTime: timestamp
       });
     }
 
@@ -62,7 +66,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       spinId: result.id,
       winner: result.winningNumber,
-      timestamp: result.createdAt.toISOString()
+      from: selection.requestedMin,
+      to: selection.requestedMax,
+      timestamp: result.createdAt.toISOString(),
+      serverTime: result.createdAt.toISOString()
     });
   } catch (error) {
     if (error instanceof SpinValidationError) {

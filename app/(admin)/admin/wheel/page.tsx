@@ -10,7 +10,10 @@ export default async function AdminWheelPage() {
   const config = await getActiveWheelConfiguration();
 
   return (
-    <AdminShell title="Wheel Control">
+    <AdminShell title="Legacy Wheel Config">
+      <div className="danger-banner mb-5 rounded-lg px-4 py-3 text-sm font-semibold">
+        This legacy configuration is kept for historical public spin records. Public Number Draw uses the visitor&apos;s selected range. Private Draws use their own draw settings.
+      </div>
       <NumberEligibilityGrid
         config={{
           minNumber: config.minNumber,

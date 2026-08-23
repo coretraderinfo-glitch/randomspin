@@ -1,12 +1,14 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SpinValidationError } from "@/lib/spin";
 
 const mocks = vi.hoisted(() => ({
   rateLimit: vi.fn(),
   getActiveWheelConfiguration: vi.fn(),
   getSiteSettings: vi.fn(),
   spinCreate: vi.fn(),
-  isDatabaseConfigured: vi.fn()
+  isDatabaseConfigured: vi.fn(),
+  selectSecureWinner: vi.fn()
 }));
 
 vi.mock("@/lib/rate-limit", () => ({ rateLimit: mocks.rateLimit }));
@@ -15,6 +17,13 @@ vi.mock("@/lib/public-data", () => ({
   getSiteSettings: mocks.getSiteSettings
 }));
 vi.mock("@/lib/db", () => ({ prisma: { spinResult: { create: mocks.spinCreate } } }));
+vi.mock("@/lib/spin", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/spin")>("@/lib/spin");
+  return {
+    ...actual,
+    selectSecureWinner: mocks.selectSecureWinner
+  };
+});
 vi.mock("@/lib/env", async () => {
   const actual = await vi.importActual<typeof import("@/lib/env")>("@/lib/env");
   return { ...actual, isDatabaseConfigured: mocks.isDatabaseConfigured };
@@ -35,11 +44,30 @@ describe("spin API", () => {
       maximumAllowedRange: 1000
     });
     mocks.isDatabaseConfigured.mockReturnValue(true);
-    mocks.spinCreate.mockResolvedValue({
+    mocks.selectSecureWinner.mockImplementation(
+      (from: number, to: number, rules: { maximumAllowedRange?: number }) => {
+        const maximumAllowedRange = rules.maximumAllowedRange ?? 1000;
+        if (from >= to) {
+          throw new SpinValidationError("FROM must be lower than TO.");
+        }
+
+        if (to - from + 1 > maximumAllowedRange) {
+          throw new SpinValidationError(`Please choose a range of ${maximumAllowedRange} numbers or fewer.`);
+        }
+
+        return {
+          winner: from,
+          eligiblePool: Array.from({ length: to - from + 1 }, (_, index) => from + index),
+          requestedMin: from,
+          requestedMax: to
+        };
+      }
+    );
+    mocks.spinCreate.mockImplementation(async ({ data }: { data: { winningNumber: number } }) => ({
       id: "spin-1",
-      winningNumber: 1,
+      winningNumber: data.winningNumber,
       createdAt: new Date("2026-08-19T00:00:00.000Z")
-    });
+    }));
   });
 
   function request(body: unknown) {
@@ -56,25 +84,68 @@ describe("spin API", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ spinId: "spin-1", winner: 1, timestamp: "2026-08-19T00:00:00.000Z" });
+    expect(body).toEqual({
+      spinId: "spin-1",
+      winner: 1,
+      from: 1,
+      to: 30,
+      timestamp: "2026-08-19T00:00:00.000Z",
+      serverTime: "2026-08-19T00:00:00.000Z"
+    });
     expect(JSON.stringify(body)).not.toContain("excludedNumbers");
     expect(JSON.stringify(body)).not.toContain("eligibleNumbers");
     expect(JSON.stringify(body)).not.toContain("admin");
   });
 
-  it("keeps the public homepage spin server-random and ignores forced winner input", async () => {
+  it("does not let Admin Wheel Control clamp the public visitor range", async () => {
     mocks.getActiveWheelConfiguration.mockResolvedValue({
       id: "wheel-1",
       minNumber: 1,
-      maxNumber: 30,
+      maxNumber: 5,
       excludedNumbers: Array.from({ length: 29 }, (_, index) => index + 2)
     });
-    mocks.spinCreate.mockResolvedValue({
-      id: "spin-1",
-      winningNumber: 1,
-      createdAt: new Date("2026-08-19T00:00:00.000Z")
+    mocks.selectSecureWinner.mockImplementation((from: number, to: number, rules: Record<string, unknown>) => {
+      expect(from).toBe(1);
+      expect(to).toBe(30);
+      expect(rules).toEqual({
+        configMin: 1,
+        configMax: 30,
+        excludedNumbers: [],
+        maximumAllowedRange: 1000
+      });
+      return {
+        winner: 24,
+        eligiblePool: Array.from({ length: 30 }, (_, index) => index + 1),
+        requestedMin: 1,
+        requestedMax: 30
+      };
     });
 
+    const { POST } = await import("@/app/api/spin/route");
+    const response = await POST(request({ from: 1, to: 30 }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      spinId: "spin-1",
+      winner: 24,
+      from: 1,
+      to: 30,
+      timestamp: "2026-08-19T00:00:00.000Z",
+      serverTime: "2026-08-19T00:00:00.000Z"
+    });
+    expect(mocks.spinCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        wheelConfigurationId: "wheel-1",
+        requestedMin: 1,
+        requestedMax: 30,
+        winningNumber: 24,
+        eligibleCount: 30
+      })
+    });
+  });
+
+  it("keeps the public homepage spin server-random and ignores forced winner input", async () => {
     const { POST } = await import("@/app/api/spin/route");
     const response = await POST(request({ from: 1, to: 30, winner: 18, mode: "OPERATOR" }));
     const body = await response.json();
@@ -82,6 +153,36 @@ describe("spin API", () => {
     expect(response.status).toBe(200);
     expect(body.winner).toBe(1);
     expect(body.winner).not.toBe(18);
+  });
+
+  it.each([
+    { from: 1, to: 5, winner: 5 },
+    { from: 1, to: 30, winner: 24 },
+    { from: 10, to: 50, winner: 24 }
+  ])("selects from the public submitted range $from-$to", async ({ from, to, winner }) => {
+    mocks.selectSecureWinner.mockReturnValue({
+      winner,
+      eligiblePool: Array.from({ length: to - from + 1 }, (_, index) => from + index),
+      requestedMin: from,
+      requestedMax: to
+    });
+
+    const { POST } = await import("@/app/api/spin/route");
+    const response = await POST(request({ from, to }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual(expect.objectContaining({ winner, from, to }));
+    expect(mocks.spinCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          requestedMin: from,
+          requestedMax: to,
+          winningNumber: winner,
+          eligibleCount: to - from + 1
+        })
+      })
+    );
   });
 
   it("rejects invalid JSON", async () => {
@@ -100,20 +201,26 @@ describe("spin API", () => {
     expect(response.status).toBe(400);
   });
 
-  it("rejects all numbers unavailable without exposing why", async () => {
+  it("ignores stale global public exclusions instead of secretly shrinking the public pool", async () => {
     mocks.getActiveWheelConfiguration.mockResolvedValue({
       id: "wheel-1",
       minNumber: 1,
       maxNumber: 3,
       excludedNumbers: [1, 2, 3]
     });
+    mocks.selectSecureWinner.mockReturnValue({
+      winner: 2,
+      eligiblePool: [1, 2, 3],
+      requestedMin: 1,
+      requestedMax: 3
+    });
+
     const { POST } = await import("@/app/api/spin/route");
     const response = await POST(request({ from: 1, to: 3 }));
     const body = await response.json();
 
-    expect(response.status).toBe(400);
-    expect(body.error).toBe("No eligible results are currently available for this range.");
-    expect(JSON.stringify(body)).not.toContain("1,2,3");
+    expect(response.status).toBe(200);
+    expect(body).toEqual(expect.objectContaining({ winner: 2, from: 1, to: 3 }));
   });
 
   it("rejects maintenance mode", async () => {
