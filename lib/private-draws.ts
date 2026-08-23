@@ -520,6 +520,10 @@ export async function createPrivateDrawSpin({
       eligiblePool = randomSelection.eligiblePool;
     }
 
+    if (winner < normalized.minNumber || winner > normalized.maxNumber) {
+      throw new SpinValidationError("Selected winner is outside the current draw range.");
+    }
+
     const result = await tx.privateDrawSpinResult.create({
       data: {
         privateDrawId: normalized.id,
@@ -535,7 +539,7 @@ export async function createPrivateDrawSpin({
 
     return {
       spinId: result.id,
-      winner: result.winningNumber,
+      winner,
       timestamp: result.createdAt.toISOString(),
       from: requestedMin,
       to: requestedMax,

@@ -47,7 +47,6 @@ export default async function PrivateDrawLivePage({ params }: { params: Promise<
   }
 
   const canonicalPath = getPrivateDrawLivePath(draw);
-  const spinCode = draw.liveSlug ?? draw.publicCode;
 
   return (
     <>
@@ -83,7 +82,7 @@ export default async function PrivateDrawLivePage({ params }: { params: Promise<
           publicCode: draw.publicCode,
           label: draw.label,
           displayStyle: draw.displayStyle,
-          spinEndpoint: `/api/draw/${encodeURIComponent(spinCode)}/spin`,
+          spinEndpoint: `/api/draw/${encodeURIComponent(draw.publicCode)}/spin`,
           sharePath: canonicalPath
         }}
       />

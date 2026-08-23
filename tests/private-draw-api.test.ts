@@ -476,6 +476,99 @@ describe("private draw operator mode APIs", () => {
     expect(mocks.privateDrawSpinCreate).toHaveBeenCalledTimes(4);
   });
 
+  it("uses the updated same-row range after 1-6 expands to 1-30 and can return 24 deterministically", async () => {
+    const { GET, POST } = await import("@/app/api/draw/[publicCode]/spin/route");
+    const oldRangeDraw = {
+      ...baseDraw,
+      minNumber: 1,
+      maxNumber: 6,
+      mode: "RANDOM",
+      pendingOperatorWinner: null,
+      excludedNumbers: [1, 3, 4, 5, 6]
+    };
+    const updatedRangeDraw = {
+      ...baseDraw,
+      minNumber: 1,
+      maxNumber: 30,
+      mode: "RANDOM",
+      pendingOperatorWinner: null,
+      excludedNumbers: Array.from({ length: 30 }, (_, index) => index + 1).filter((value) => value !== 24)
+    };
+
+    mocks.privateDrawFindUnique.mockResolvedValueOnce(oldRangeDraw).mockResolvedValue(updatedRangeDraw);
+    mocks.privateDrawSpinCreate.mockImplementation(async ({ data }: { data: { requestedMin: number; requestedMax: number; winningNumber: number } }) => ({
+      id: `draw-spin-${data.winningNumber}`,
+      winningNumber: data.winningNumber,
+      createdAt: new Date("2026-08-21T01:02:03.000Z")
+    }));
+
+    const firstSpin = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const firstBody = await firstSpin.json();
+    const state = await GET(new NextRequest("http://localhost:3000/api/draw/A7K29P/spin"), {
+      params: Promise.resolve({ publicCode: "A7K29P" })
+    });
+    const stateBody = await state.json();
+    const secondSpin = await POST(audienceRequest({ from: 1, to: 6 }), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const secondBody = await secondSpin.json();
+
+    expect(firstSpin.status).toBe(200);
+    expect(firstBody).toEqual(expect.objectContaining({ winner: 2, from: 1, to: 6 }));
+    expect(state.status).toBe(200);
+    expect(stateBody).toEqual(expect.objectContaining({ from: 1, to: 30 }));
+    expect(secondSpin.status).toBe(200);
+    expect(secondBody).toEqual(expect.objectContaining({ winner: 24, from: 1, to: 30 }));
+    expect(mocks.privateDrawSpinCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          privateDrawId: "draw-1",
+          requestedMin: 1,
+          requestedMax: 30,
+          winningNumber: 24,
+          eligibleCount: 1
+        })
+      })
+    );
+  });
+
+  it("friendly slug and public code resolve to the same private draw row", async () => {
+    const { getPrivateDrawAudience } = await import("@/lib/private-draws");
+    const draw = { ...baseDraw, publicCode: "ABC12345", liveSlug: "friday", minNumber: 1, maxNumber: 30 };
+    mocks.privateDrawFindUnique.mockResolvedValue(draw);
+
+    const bySlug = await getPrivateDrawAudience("friday");
+    const byPublicCode = await getPrivateDrawAudience("ABC12345");
+
+    expect(bySlug?.id).toBe("draw-1");
+    expect(byPublicCode?.id).toBe("draw-1");
+    expect(bySlug?.id).toBe(byPublicCode?.id);
+    expect(mocks.privateDrawFindFirst).toHaveBeenNthCalledWith(1, {
+      where: { OR: [{ publicCode: "FRIDAY" }, { liveSlug: "friday" }] }
+    });
+    expect(mocks.privateDrawFindFirst).toHaveBeenNthCalledWith(2, {
+      where: { OR: [{ publicCode: "ABC12345" }, { liveSlug: "abc12345" }] }
+    });
+  });
+
+  it("rejects any selected private winner outside the current database range before recording history", async () => {
+    const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
+    mocks.privateDrawFindUnique.mockResolvedValue({ ...baseDraw, minNumber: 1, maxNumber: 6, pendingOperatorWinner: 24, excludedNumbers: [] });
+
+    const response = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.winner).toBeGreaterThanOrEqual(1);
+    expect(body.winner).toBeLessThanOrEqual(6);
+    expect(body.from).toBe(1);
+    expect(body.to).toBe(6);
+    expect(mocks.privateDrawSpinCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ requestedMin: 1, requestedMax: 6 })
+      })
+    );
+  });
+
   it("private spin rejects an invalid stored FROM greater than TO range", async () => {
     const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
     mocks.privateDrawFindUnique.mockResolvedValue({ ...baseDraw, minNumber: 10, maxNumber: 1, mode: "OPERATOR", pendingOperatorWinner: null });

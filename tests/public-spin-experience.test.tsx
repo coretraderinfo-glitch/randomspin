@@ -1051,6 +1051,8 @@ describe("public spin experience", () => {
     expect(routeSource).toContain("robots");
     expect(routeSource).toContain("index: false");
     expect(routeSource).toContain("getPrivateDrawLivePath");
+    expect(routeSource).toContain("encodeURIComponent(draw.publicCode)");
+    expect(routeSource).not.toContain("draw.liveSlug ?? draw.publicCode");
     expect(routeSource).not.toContain("LuckyWheel");
     expect(routeSource).not.toContain("WinnerModal");
     expect(routeSource).not.toContain("RangeSelector");
