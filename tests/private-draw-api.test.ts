@@ -532,6 +532,27 @@ describe("private draw operator mode APIs", () => {
     expect(JSON.stringify(draw)).not.toContain("excludedNumbers");
   });
 
+  it("audience draw state endpoint exposes only safe authoritative range metadata", async () => {
+    const { GET } = await import("@/app/api/draw/[publicCode]/spin/route");
+    mocks.privateDrawFindUnique.mockResolvedValue({ ...baseDraw, minNumber: 1, maxNumber: 25, displayStyle: "NUMBER_ROLLER" });
+
+    const response = await GET(new NextRequest("http://localhost:3000/api/draw/A7K29P/spin"), {
+      params: Promise.resolve({ publicCode: "A7K29P" })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      from: 1,
+      to: 25,
+      label: "OPERATOR DRAW",
+      displayStyle: "NUMBER_ROLLER"
+    });
+    expect(JSON.stringify(body)).not.toContain("pendingOperatorWinner");
+    expect(JSON.stringify(body)).not.toContain("excludedNumbers");
+    expect(JSON.stringify(body)).not.toContain("draw-1");
+  });
+
   it("audience label is random when operator mode has no pending next winner", async () => {
     const { getPrivateDrawAudience } = await import("@/lib/private-draws");
     mocks.privateDrawFindUnique.mockResolvedValue({ ...baseDraw, pendingOperatorWinner: null });
@@ -679,10 +700,12 @@ describe("private draw operator mode APIs", () => {
     expect(mocks.privateDrawSpinCreate).toHaveBeenCalledTimes(1);
   });
 
-  it("audience cannot force a winner through request body", async () => {
+  it("audience cannot force a winner or private range through request body", async () => {
     const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
     mocks.privateDrawFindUnique.mockResolvedValue({
       ...baseDraw,
+      minNumber: 1,
+      maxNumber: 5,
       excludedNumbers: [2, 3, 4, 5, 6, 7, 8, 9, 10],
       mode: "RANDOM",
       pendingOperatorWinner: null
@@ -693,14 +716,21 @@ describe("private draw operator mode APIs", () => {
       createdAt: new Date("2026-08-21T01:02:03.000Z")
     });
 
-    const response = await POST(audienceRequest({ winner: 8, nextWinner: 8, mode: "OPERATOR" }), {
+    const response = await POST(audienceRequest({ from: 1, to: 25, winner: 8, nextWinner: 8, mode: "OPERATOR" }), {
       params: Promise.resolve({ publicCode: "A7K29P" })
     });
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body.winner).toBe(1);
+    expect(body.from).toBe(1);
+    expect(body.to).toBe(5);
     expect(body.winner).not.toBe(8);
+    expect(mocks.privateDrawSpinCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ requestedMin: 1, requestedMax: 5, winningNumber: 1 })
+      })
+    );
   });
 
   it("random mode does not secretly consume or use a pending operator number", async () => {

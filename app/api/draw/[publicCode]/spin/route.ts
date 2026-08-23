@@ -1,12 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env } from "@/lib/env";
-import { PrivateDrawNotFoundError, createPrivateDrawSpin } from "@/lib/private-draws";
+import { PrivateDrawNotFoundError, createPrivateDrawSpin, getPrivateDrawAudience } from "@/lib/private-draws";
 import { rateLimit } from "@/lib/rate-limit";
 import { getClientIp, hashIp, jsonError, sanitizeUserAgent } from "@/lib/security";
 import { SpinValidationError } from "@/lib/spin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+export async function GET(_request: NextRequest, { params }: { params: Promise<{ publicCode: string }> }) {
+  try {
+    const { publicCode } = await params;
+    const draw = await getPrivateDrawAudience(publicCode);
+
+    if (!draw) {
+      return jsonError("Draw not found.", 404);
+    }
+
+    return NextResponse.json({
+      from: draw.minNumber,
+      to: draw.maxNumber,
+      label: draw.label,
+      displayStyle: draw.displayStyle
+    });
+  } catch (error) {
+    console.error("Private draw state error", error);
+    return jsonError("Draw is unavailable right now. Please try again shortly.", 500);
+  }
+}
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ publicCode: string }> }) {
   try {

@@ -8,10 +8,15 @@ type RangeSelectorProps = {
   min?: number;
   max?: number;
   onChange: (value: number) => void;
+  readOnly?: boolean;
 };
 
-export function RangeSelector({ label, value, min = -1_000_000, max = 1_000_000, onChange }: RangeSelectorProps) {
+export function RangeSelector({ label, value, min = -1_000_000, max = 1_000_000, onChange, readOnly = false }: RangeSelectorProps) {
   function update(next: number) {
+    if (readOnly || !Number.isFinite(next) || !Number.isInteger(next)) {
+      return;
+    }
+
     onChange(Math.max(min, Math.min(max, next)));
   }
 
@@ -24,6 +29,7 @@ export function RangeSelector({ label, value, min = -1_000_000, max = 1_000_000,
           className="focus-ring grid h-12 place-items-center text-[#f6d98f] transition hover:bg-white/10"
           onClick={() => update(value - 1)}
           aria-label={`Decrease ${label}`}
+          disabled={readOnly}
         >
           <Minus className="size-4" />
         </button>
@@ -33,6 +39,8 @@ export function RangeSelector({ label, value, min = -1_000_000, max = 1_000_000,
           inputMode="numeric"
           value={value}
           onChange={(event) => update(Number(event.target.value))}
+          readOnly={readOnly}
+          aria-readonly={readOnly}
           aria-label={label}
         />
         <button
@@ -40,6 +48,7 @@ export function RangeSelector({ label, value, min = -1_000_000, max = 1_000_000,
           className="focus-ring grid h-12 place-items-center text-[#f6d98f] transition hover:bg-white/10"
           onClick={() => update(value + 1)}
           aria-label={`Increase ${label}`}
+          disabled={readOnly}
         >
           <Plus className="size-4" />
         </button>

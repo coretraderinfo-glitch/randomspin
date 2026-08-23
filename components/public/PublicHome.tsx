@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { CircleDot, Maximize2, RotateCcw, Share2, Volume2, VolumeX } from "lucide-react";
 import { BrandMark } from "@/components/ui/BrandMark";
@@ -72,6 +72,22 @@ type SpinResponse = {
   error?: never;
 };
 
+type PrivateDrawStateResponse = {
+  from: number;
+  to: number;
+  label?: string;
+  displayStyle?: PrivateDrawDisplayStyle;
+};
+
+function isPrivateDrawStateResponse(value: unknown): value is PrivateDrawStateResponse {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Number.isInteger((value as { from?: unknown }).from) &&
+    Number.isInteger((value as { to?: unknown }).to)
+  );
+}
+
 const NUMBER_ROLLER_FAST_INTERVAL_MS = 52;
 const NUMBER_ROLLER_MIN_ACTIVE_MS = 1120;
 const NUMBER_ROLLER_REDUCED_MOTION_MIN_ACTIVE_MS = 620;
@@ -118,6 +134,7 @@ export function PublicHome({
   const wheelRef = useRef<SVGSVGElement | null>(null);
   const pointerRef = useRef<HTMLDivElement | null>(null);
   const rotationRef = useRef(rotation);
+  const authoritativeRangeRef = useRef({ from: settings.defaultFrom, to: settings.defaultTo });
   const spinActiveRef = useRef(false);
   const spinStartedAtRef = useRef(0);
   const neutralFrameAtRef = useRef(0);
@@ -127,7 +144,9 @@ export function PublicHome({
   const rollerSequenceIndexRef = useRef(0);
   const rollerLastPlaceholderRef = useRef<number | null>(null);
 
-  const rangeInvalid = useMemo(() => from >= to || to - from + 1 > settings.maximumAllowedRange, [
+  const isPrivateDraw = drawMode.kind === "private";
+  const rangeInvalid = useMemo(() => !isPrivateDraw && (from >= to || to - from + 1 > settings.maximumAllowedRange), [
+    isPrivateDraw,
     from,
     to,
     settings.maximumAllowedRange
@@ -153,6 +172,10 @@ export function PublicHome({
   }, [rotation]);
 
   useEffect(() => {
+    authoritativeRangeRef.current = { from, to };
+  }, [from, to]);
+
+  useEffect(() => {
     if (!spinActiveRef.current) {
       setRollerNumber(from);
       rollerSequenceRef.current = [];
@@ -162,6 +185,69 @@ export function PublicHome({
       setRollerTempo("READY");
     }
   }, [from, to]);
+
+  const applyPrivateDrawState = useCallback((state: PrivateDrawStateResponse) => {
+    if (!Number.isInteger(state.from) || !Number.isInteger(state.to)) {
+      return null;
+    }
+
+    const normalizedState = {
+      from: state.from,
+      to: state.to,
+      label: state.label,
+      displayStyle: state.displayStyle
+    };
+
+    authoritativeRangeRef.current = { from: normalizedState.from, to: normalizedState.to };
+    setFrom(normalizedState.from);
+    setTo(normalizedState.to);
+    if (!spinActiveRef.current) {
+      setRollerNumber(normalizedState.from);
+    }
+    if (normalizedState.label) {
+      setLiveDrawModeLabel(normalizedState.label);
+    }
+
+    return normalizedState;
+  }, []);
+
+  const refreshPrivateDrawState = useCallback(async () => {
+    if (drawMode.kind !== "private") {
+      return null;
+    }
+
+    const response = await fetch(drawMode.spinEndpoint, {
+      method: "GET",
+      headers: { Accept: "application/json" }
+    });
+    const data = (await response.json().catch(() => null)) as unknown;
+
+    if (!response.ok || !isPrivateDrawStateResponse(data)) {
+      return null;
+    }
+
+    return applyPrivateDrawState(data);
+  }, [applyPrivateDrawState, drawMode]);
+
+  useEffect(() => {
+    if (drawMode.kind !== "private") {
+      return;
+    }
+
+    const syncOnFocus = () => {
+      if (!spinActiveRef.current) {
+        void refreshPrivateDrawState();
+      }
+    };
+
+    window.addEventListener("focus", syncOnFocus);
+    document.addEventListener("visibilitychange", syncOnFocus);
+
+    return () => {
+      window.removeEventListener("focus", syncOnFocus);
+      document.removeEventListener("visibilitychange", syncOnFocus);
+    };
+  }, [drawMode.kind, refreshPrivateDrawState]);
 
   useEffect(() => {
     return () => {
@@ -357,8 +443,9 @@ export function PublicHome({
   }
 
   function buildRollerPlaceholderSequence() {
-    const rangeSize = Math.max(to - from + 1, 1);
-    const values = Array.from({ length: rangeSize }, (_, index) => from + index);
+    const range = authoritativeRangeRef.current;
+    const rangeSize = Math.max(range.to - range.from + 1, 1);
+    const values = Array.from({ length: rangeSize }, (_, index) => range.from + index);
 
     for (let index = values.length - 1; index > 0; index -= 1) {
       const swapIndex = Math.floor(Math.random() * (index + 1));
@@ -378,16 +465,17 @@ export function PublicHome({
       buildRollerPlaceholderSequence();
     }
 
-    const next = rollerSequenceRef.current[rollerSequenceIndexRef.current] ?? from;
+    const next = rollerSequenceRef.current[rollerSequenceIndexRef.current] ?? authoritativeRangeRef.current.from;
     rollerSequenceIndexRef.current += 1;
     return next;
   }
 
   function getNextRollerPlaceholder(avoidValue?: number) {
     let next = takeRollerSequenceCandidate();
+    const range = authoritativeRangeRef.current;
 
-    if (to > from && (next === rollerLastPlaceholderRef.current || next === avoidValue)) {
-      const maxAttempts = Math.max(to - from + 1, 2) + 1;
+    if (range.to > range.from && (next === rollerLastPlaceholderRef.current || next === avoidValue)) {
+      const maxAttempts = Math.max(range.to - range.from + 1, 2) + 1;
       let fallback = next;
 
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -541,10 +629,14 @@ export function PublicHome({
 
   function finishWithServerWinner({
     winner,
+    from,
+    to,
     renderedSegmentCount,
     onComplete
   }: {
     winner: number;
+    from: number;
+    to: number;
     renderedSegmentCount: number;
     onComplete: () => void;
   }) {
@@ -583,6 +675,20 @@ export function PublicHome({
       return;
     }
 
+    let activeFrom = from;
+    let activeTo = to;
+    if (drawMode.kind === "private") {
+      const syncedState = await refreshPrivateDrawState();
+      if (!syncedState) {
+        setMessageTone("danger");
+        setMessage("Unable to refresh the live draw range. Please try again.");
+        return;
+      }
+
+      activeFrom = syncedState.from;
+      activeTo = syncedState.to;
+    }
+
     if (rangeInvalid) {
       setMessageTone("danger");
       setMessage(
@@ -605,17 +711,18 @@ export function PublicHome({
     spinStartedAtRef.current = performance.now();
     neutralFrameAtRef.current = 0;
     kinematicsRef.current = { angle: rotationRef.current, velocity: 0 };
+    authoritativeRangeRef.current = { from: activeFrom, to: activeTo };
     if (showNumberRoller) {
       startNeutralRoller();
     } else {
-      startNeutralSpin(getWheelVisualPlan(from, to, null).renderedSegmentCount);
+      startNeutralSpin(getWheelVisualPlan(activeFrom, activeTo, null).renderedSegmentCount);
     }
 
     try {
       const response = await fetch(spinEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from, to })
+        body: JSON.stringify(drawMode.kind === "private" ? {} : { from: activeFrom, to: activeTo })
       });
       const data = (await response.json()) as SpinResponse | { error: string };
 
@@ -623,12 +730,13 @@ export function PublicHome({
         throw new Error("error" in data ? data.error : "Spin failed.");
       }
 
-      const resultFrom = data.from ?? from;
-      const resultTo = data.to ?? to;
-      const effectiveFrom = drawMode.kind === "private" ? resultFrom : from;
-      const effectiveTo = drawMode.kind === "private" ? resultTo : to;
+      const resultFrom = data.from ?? activeFrom;
+      const resultTo = data.to ?? activeTo;
+      const effectiveFrom = drawMode.kind === "private" ? resultFrom : activeFrom;
+      const effectiveTo = drawMode.kind === "private" ? resultTo : activeTo;
       const spinResult = { winner: data.winner, spinId: data.spinId, timestamp: data.timestamp, from: resultFrom, to: resultTo };
       setWinner(data.winner);
+      authoritativeRangeRef.current = { from: effectiveFrom, to: effectiveTo };
       const completedRoundLabel = data.mode === "OPERATOR" ? "OPERATOR DRAW" : data.mode === "RANDOM" ? "RANDOM DRAW" : null;
       if (drawMode.kind === "private") {
         setFrom(resultFrom);
@@ -664,6 +772,8 @@ export function PublicHome({
         const visualPlan = getWheelVisualPlan(effectiveFrom, effectiveTo, data.winner);
         finishWithServerWinner({
           winner: data.winner,
+          from: effectiveFrom,
+          to: effectiveTo,
           renderedSegmentCount: visualPlan.renderedSegmentCount,
           onComplete: completeSpin
         });
@@ -804,8 +914,8 @@ export function PublicHome({
             </p>
 
             <div className="mt-8 grid grid-cols-2 gap-4">
-              <RangeSelector label="From" value={from} onChange={setFrom} />
-              <RangeSelector label="To" value={to} onChange={setTo} />
+              <RangeSelector label="From" value={from} onChange={setFrom} readOnly={drawMode.kind === "private"} />
+              <RangeSelector label="To" value={to} onChange={setTo} readOnly={drawMode.kind === "private"} />
             </div>
           </motion.div>
 

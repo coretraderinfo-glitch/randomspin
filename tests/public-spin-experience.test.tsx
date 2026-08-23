@@ -63,7 +63,16 @@ describe("public spin experience", () => {
   }
 
   function mockSpinResponses(...winners: number[]) {
-    return vi.fn().mockImplementation(() => {
+    return vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      if (init?.method === "GET") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ from: settings.defaultFrom, to: settings.defaultTo, label: "RANDOM DRAW", displayStyle: "WHEEL" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          })
+        );
+      }
+
       const winner = winners.shift();
 
       if (winner === undefined) {
@@ -75,7 +84,9 @@ describe("public spin experience", () => {
           JSON.stringify({
             spinId: `spin-${winner}-abcdef`,
             winner,
-            timestamp: `2026-08-19T09:45:${String(winner).padStart(2, "0")}.000Z`
+            timestamp: `2026-08-19T09:45:${String(winner).padStart(2, "0")}.000Z`,
+            from: settings.defaultFrom,
+            to: settings.defaultTo
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
         )
@@ -176,6 +187,16 @@ describe("public spin experience", () => {
     expect(screen.getByRole("spinbutton", { name: "From" })).toHaveValue(1);
     expect(screen.getByRole("spinbutton", { name: "To" })).toHaveValue(29);
     expect(screen.getAllByRole("button", { name: "SPIN AGAIN" }).length).toBeGreaterThan(0);
+  });
+
+  it("normalizes leading zero range input as base-10 integers", () => {
+    render(<PublicHome settings={settings} initialResults={[]} />);
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "From" }), { target: { value: "01" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "To" }), { target: { value: "025" } });
+
+    expect(screen.getByRole("spinbutton", { name: "From" })).toHaveValue(1);
+    expect(screen.getByRole("spinbutton", { name: "To" })).toHaveValue(25);
   });
 
   it("renders winner metadata from the supplied server result", () => {
@@ -380,6 +401,9 @@ describe("public spin experience", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Number" }));
     fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(screen.getByText("RANDOMIZING")).toBeInTheDocument();
     expect(screen.queryByText("WINNING NUMBER")).not.toBeInTheDocument();
     await completeSuccessfulSpin();
@@ -502,9 +526,21 @@ describe("public spin experience", () => {
   });
 
   it("number roller API failure stops without showing a fake winner", async () => {
+    const fetchMock = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      if (init?.method === "GET") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ from: 1, to: 30, label: "RANDOM DRAW", displayStyle: "NUMBER_ROLLER" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          })
+        );
+      }
+
+      return Promise.resolve(new Response(JSON.stringify({ error: "Draw is unavailable right now." }), { status: 500 }));
+    });
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "Draw is unavailable right now." }), { status: 500 }))
+      fetchMock
     );
 
     render(
@@ -555,9 +591,17 @@ describe("public spin experience", () => {
   });
 
   it("private operator badge returns to random after a confirmed winner is consumed", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
+    const fetchMock = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      if (init?.method === "GET") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ from: 1, to: 30, label: "OPERATOR DRAW", displayStyle: "WHEEL" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          })
+        );
+      }
+
+      return Promise.resolve(
         new Response(
           JSON.stringify({
             spinId: "spin-operator-18",
@@ -570,8 +614,9 @@ describe("public spin experience", () => {
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
         )
-      )
-    );
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <PublicHome
@@ -596,18 +641,24 @@ describe("public spin experience", () => {
   });
 
   it("no-pending private operator fallback completes without an audience error", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          spinId: "spin-random-fallback",
-          winner: 11,
-          timestamp: "2026-08-19T09:45:11.000Z",
-          from: 1,
-          to: 66,
-          mode: "RANDOM",
-          nextLabel: "RANDOM DRAW"
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
+    const fetchMock = vi.fn().mockImplementation((_url: string, init?: RequestInit) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify(
+            init?.method === "GET"
+              ? { from: 1, to: 66, label: "RANDOM DRAW", displayStyle: "WHEEL" }
+              : {
+                  spinId: "spin-random-fallback",
+                  winner: 11,
+                  timestamp: "2026-08-19T09:45:11.000Z",
+                  from: 1,
+                  to: 66,
+                  mode: "RANDOM",
+                  nextLabel: "RANDOM DRAW"
+                }
+          ),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
       )
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -636,18 +687,24 @@ describe("public spin experience", () => {
   });
 
   it("does not show a three-number range error for valid private 1-66 draws", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          spinId: "spin-66",
-          winner: 42,
-          timestamp: "2026-08-19T09:45:42.000Z",
-          from: 1,
-          to: 66,
-          mode: "RANDOM",
-          nextLabel: "RANDOM DRAW"
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
+    const fetchMock = vi.fn().mockImplementation((_url: string, init?: RequestInit) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify(
+            init?.method === "GET"
+              ? { from: 1, to: 66, label: "RANDOM DRAW", displayStyle: "WHEEL" }
+              : {
+                  spinId: "spin-66",
+                  winner: 42,
+                  timestamp: "2026-08-19T09:45:42.000Z",
+                  from: 1,
+                  to: 66,
+                  mode: "RANDOM",
+                  nextLabel: "RANDOM DRAW"
+                }
+          ),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
       )
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -670,7 +727,7 @@ describe("public spin experience", () => {
       await Promise.resolve();
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(screen.queryByText("Please choose a range of 3 numbers or fewer.")).not.toBeInTheDocument();
     expect(screen.queryByText(/Please choose a range of .* numbers or fewer./)).not.toBeInTheDocument();
   });
@@ -683,9 +740,17 @@ describe("public spin experience", () => {
   });
 
   it("private audience uses server-returned range on the same draw URL", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
+    const fetchMock = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      if (init?.method === "GET") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ from: 1, to: 30, label: "RANDOM DRAW", displayStyle: "WHEEL" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          })
+        );
+      }
+
+      return Promise.resolve(
         new Response(
           JSON.stringify({
             spinId: "spin-live-range",
@@ -696,8 +761,9 @@ describe("public spin experience", () => {
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
         )
-      )
-    );
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <PublicHome
@@ -717,6 +783,126 @@ describe("public spin experience", () => {
 
     expect(screen.getByRole("spinbutton", { name: "To" })).toHaveValue(30);
     expectWinnerNumber(29);
+  });
+
+  it("private audience range is read-only and cannot imply a backend mutation", async () => {
+    const fetchMock = mockSpinResponses(4);
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <PublicHome
+        settings={{ ...settings, defaultFrom: 1, defaultTo: 5 }}
+        initialResults={[]}
+        drawMode={{
+          kind: "private",
+          publicCode: "A7K29P",
+          label: "RANDOM DRAW",
+          spinEndpoint: "/api/draw/A7K29P/spin"
+        }}
+      />
+    );
+
+    expect(screen.getByRole("spinbutton", { name: "From" })).toHaveAttribute("readonly");
+    expect(screen.getByRole("spinbutton", { name: "To" })).toHaveAttribute("readonly");
+    fireEvent.change(screen.getByRole("spinbutton", { name: "To" }), { target: { value: "025" } });
+
+    expect(screen.getByRole("spinbutton", { name: "To" })).toHaveValue(5);
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    await completeSuccessfulSpin();
+
+    const postCall = fetchMock.mock.calls.find((call) => call[1]?.method === "POST");
+    expect(postCall?.[1]).toEqual(expect.objectContaining({ body: "{}" }));
+    expect(screen.getByText("1–30")).toBeInTheDocument();
+  });
+
+  it("private audience syncs the authoritative range before wheel spin", async () => {
+    const fetchMock = vi.fn().mockImplementation((_url: string, init?: RequestInit) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify(
+            init?.method === "GET"
+              ? { from: 1, to: 25, label: "RANDOM DRAW", displayStyle: "WHEEL" }
+              : {
+                  spinId: "spin-expanded-range",
+                  winner: 25,
+                  timestamp: "2026-08-19T09:45:25.000Z",
+                  from: 1,
+                  to: 25,
+                  mode: "RANDOM",
+                  nextLabel: "RANDOM DRAW"
+                }
+          ),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <PublicHome
+        settings={{ ...settings, defaultFrom: 1, defaultTo: 5 }}
+        initialResults={[]}
+        drawMode={{
+          kind: "private",
+          publicCode: "A7K29P",
+          label: "RANDOM DRAW",
+          spinEndpoint: "/api/draw/A7K29P/spin"
+        }}
+      />
+    );
+
+    expect(screen.getByRole("spinbutton", { name: "To" })).toHaveValue(5);
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    await completeSuccessfulSpin();
+
+    expect(fetchMock.mock.calls.map((call) => call[1]?.method)).toEqual(["GET", "POST"]);
+    expect(screen.getByRole("spinbutton", { name: "To" })).toHaveValue(25);
+    expect(screen.getByTestId("winning-segment")).toHaveAttribute("data-winning-number", "25");
+    expect(screen.getByText("1–25")).toBeInTheDocument();
+  });
+
+  it("private number roller syncs and displays the authoritative current range", async () => {
+    const fetchMock = vi.fn().mockImplementation((_url: string, init?: RequestInit) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify(
+            init?.method === "GET"
+              ? { from: 1, to: 25, label: "RANDOM DRAW", displayStyle: "NUMBER_ROLLER" }
+              : {
+                  spinId: "spin-roller-expanded-range",
+                  winner: 25,
+                  timestamp: "2026-08-19T09:45:25.000Z",
+                  from: 1,
+                  to: 25,
+                  mode: "RANDOM",
+                  nextLabel: "RANDOM DRAW"
+                }
+          ),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <PublicHome
+        settings={{ ...settings, defaultFrom: 1, defaultTo: 5 }}
+        initialResults={[]}
+        drawMode={{
+          kind: "private",
+          publicCode: "A7K29P",
+          label: "RANDOM DRAW",
+          displayStyle: "NUMBER_ROLLER",
+          spinEndpoint: "/api/draw/A7K29P/spin"
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    await completeSuccessfulSpin();
+
+    expect(screen.getByTestId("number-roller-display")).toHaveTextContent("Range 1-25");
+    expect(screen.getByTestId("number-roller-value")).toHaveTextContent("25");
   });
 
   it("number roller supports SPIN AGAIN after the winner modal closes", async () => {
@@ -745,7 +931,8 @@ describe("public spin experience", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "SPIN AGAIN" })[0]);
     await completeSuccessfulSpin();
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls.filter((call) => call[1]?.method === "POST")).toHaveLength(2);
     expect(screen.getByTestId("number-roller-value")).toHaveTextContent("14");
     expect(screen.getAllByRole("button", { name: "SPIN AGAIN" }).length).toBeGreaterThan(0);
   });
