@@ -58,6 +58,9 @@ export type PublicDrawMode =
       spinEndpoint: string;
       label?: string;
       displayStyle?: PrivateDrawDisplayStyle;
+      rangeEndpoint?: string;
+      rangeRevision?: string;
+      canEditRange?: boolean;
       sharePath?: string;
     };
 
@@ -77,6 +80,7 @@ type PrivateDrawStateResponse = {
   to: number;
   label?: string;
   displayStyle?: PrivateDrawDisplayStyle;
+  revision?: string;
 };
 
 function isPrivateDrawStateResponse(value: unknown): value is PrivateDrawStateResponse {
@@ -93,6 +97,10 @@ const NUMBER_ROLLER_MIN_ACTIVE_MS = 1120;
 const NUMBER_ROLLER_REDUCED_MOTION_MIN_ACTIVE_MS = 620;
 const NUMBER_ROLLER_FINAL_DELAYS_MS = [100, 140, 190, 260];
 const NUMBER_ROLLER_REDUCED_MOTION_FINAL_DELAYS_MS = [180, 260, 340];
+
+function sameRange(left: { from: number; to: number }, right: { from: number; to: number }) {
+  return left.from === right.from && left.to === right.to;
+}
 
 export function PublicHome({
   settings,
@@ -143,8 +151,15 @@ export function PublicHome({
   const rollerSequenceRef = useRef<number[]>([]);
   const rollerSequenceIndexRef = useRef(0);
   const rollerLastPlaceholderRef = useRef<number | null>(null);
+  const saveRangeTimerRef = useRef<number | null>(null);
+  const saveRangeInFlightRef = useRef<Promise<PrivateDrawStateResponse | null> | null>(null);
+  const saveRangeQueuedRef = useRef(false);
+  const desiredRangeRef = useRef({ from: settings.defaultFrom, to: settings.defaultTo });
+  const lastSavedRangeRef = useRef({ from: settings.defaultFrom, to: settings.defaultTo });
+  const rangeRevisionRef = useRef(drawMode.kind === "private" ? drawMode.rangeRevision ?? null : null);
 
   const isPrivateDraw = drawMode.kind === "private";
+  const canEditPrivateRange = drawMode.kind === "private" && drawMode.canEditRange === true && Boolean(drawMode.rangeEndpoint);
   const rangeInvalid = useMemo(() => !isPrivateDraw && (from >= to || to - from + 1 > settings.maximumAllowedRange), [
     isPrivateDraw,
     from,
@@ -162,6 +177,8 @@ export function PublicHome({
     configuredViewMode === PRIVATE_DRAW_NUMBER_ROLLER_DISPLAY ? PRIVATE_DRAW_NUMBER_ROLLER_DISPLAY : PRIVATE_DRAW_WHEEL_DISPLAY;
   const [viewMode, setViewMode] = useState<PrivateDrawDisplayStyle>(initialViewMode);
   const showNumberRoller = viewMode === PRIVATE_DRAW_NUMBER_ROLLER_DISPLAY;
+  const [rangeSaveMessage, setRangeSaveMessage] = useState<string | null>(null);
+  const [rangeSaveTone, setRangeSaveTone] = useState<"neutral" | "danger">("neutral");
 
   useEffect(() => {
     window.localStorage.setItem("lucky-spin-sound", soundEnabled ? "on" : "off");
@@ -195,10 +212,15 @@ export function PublicHome({
       from: state.from,
       to: state.to,
       label: state.label,
-      displayStyle: state.displayStyle
+      displayStyle: state.displayStyle,
+      revision: state.revision
     };
 
     authoritativeRangeRef.current = { from: normalizedState.from, to: normalizedState.to };
+    lastSavedRangeRef.current = { from: normalizedState.from, to: normalizedState.to };
+    if (normalizedState.revision) {
+      rangeRevisionRef.current = normalizedState.revision;
+    }
     setFrom(normalizedState.from);
     setTo(normalizedState.to);
     if (!spinActiveRef.current) {
@@ -210,6 +232,29 @@ export function PublicHome({
 
     return normalizedState;
   }, []);
+
+  const validateEditablePrivateRange = useCallback(
+    (range: { from: number; to: number }) => {
+      if (!Number.isInteger(range.from) || !Number.isInteger(range.to)) {
+        return "Live draw range must use whole numbers.";
+      }
+
+      if (range.from < 0 || range.to < 0) {
+        return "Live draw range cannot use negative numbers.";
+      }
+
+      if (range.from >= range.to) {
+        return "FROM must be lower than TO.";
+      }
+
+      if (range.to - range.from + 1 > settings.maximumAllowedRange) {
+        return `Please choose a range of ${settings.maximumAllowedRange} numbers or fewer.`;
+      }
+
+      return null;
+    },
+    [settings.maximumAllowedRange]
+  );
 
   const refreshPrivateDrawState = useCallback(async () => {
     if (drawMode.kind !== "private") {
@@ -229,6 +274,94 @@ export function PublicHome({
     return applyPrivateDrawState(data);
   }, [applyPrivateDrawState, drawMode]);
 
+  const savePrivateDrawRange = useCallback(
+    async (requestedRange: { from: number; to: number }) => {
+      if (drawMode.kind !== "private" || !canEditPrivateRange || !drawMode.rangeEndpoint) {
+        return null;
+      }
+
+      const rangeEndpoint = drawMode.rangeEndpoint;
+      desiredRangeRef.current = requestedRange;
+      const validationMessage = validateEditablePrivateRange(requestedRange);
+      if (validationMessage) {
+        setRangeSaveTone("danger");
+        setRangeSaveMessage(validationMessage);
+        return null;
+      }
+
+      if (!saveRangeInFlightRef.current && sameRange(requestedRange, lastSavedRangeRef.current)) {
+        return {
+          from: lastSavedRangeRef.current.from,
+          to: lastSavedRangeRef.current.to,
+          label: liveDrawModeLabel,
+          displayStyle: viewMode,
+          revision: rangeRevisionRef.current ?? undefined
+        };
+      }
+
+      if (saveRangeInFlightRef.current) {
+        saveRangeQueuedRef.current = true;
+        return saveRangeInFlightRef.current;
+      }
+
+      const savePromise = (async () => {
+        let rangeToSave = requestedRange;
+
+        for (;;) {
+          saveRangeQueuedRef.current = false;
+          setRangeSaveTone("neutral");
+          setRangeSaveMessage("Saving live range...");
+
+          const response = await fetch(rangeEndpoint, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({
+              from: rangeToSave.from,
+              to: rangeToSave.to,
+              revision: rangeRevisionRef.current
+            })
+          });
+          const data = (await response.json().catch(() => null)) as
+            | PrivateDrawStateResponse
+            | { error?: string; current?: PrivateDrawStateResponse | null }
+            | null;
+
+          if (!response.ok || !data || !isPrivateDrawStateResponse(data)) {
+            if (data && typeof data === "object" && "current" in data && data.current && isPrivateDrawStateResponse(data.current)) {
+              applyPrivateDrawState(data.current);
+            } else {
+              await refreshPrivateDrawState();
+            }
+
+            setRangeSaveTone("danger");
+            setRangeSaveMessage(data && typeof data === "object" && "error" in data && data.error ? data.error : "Live range could not be saved.");
+            return null;
+          }
+
+          const savedState = applyPrivateDrawState(data);
+          setRangeSaveTone("neutral");
+          setRangeSaveMessage("Live range saved.");
+
+          if (!saveRangeQueuedRef.current || sameRange(desiredRangeRef.current, { from: data.from, to: data.to })) {
+            return savedState;
+          }
+
+          rangeToSave = desiredRangeRef.current;
+        }
+      })();
+
+      saveRangeInFlightRef.current = savePromise;
+      try {
+        return await savePromise;
+      } finally {
+        if (saveRangeInFlightRef.current === savePromise) {
+          saveRangeInFlightRef.current = null;
+        }
+      }
+    },
+    [applyPrivateDrawState, canEditPrivateRange, drawMode, liveDrawModeLabel, refreshPrivateDrawState, validateEditablePrivateRange, viewMode]
+  );
+
   useEffect(() => {
     if (drawMode.kind !== "private") {
       return;
@@ -236,6 +369,11 @@ export function PublicHome({
 
     const syncOnFocus = () => {
       if (!spinActiveRef.current) {
+        if (canEditPrivateRange && !sameRange(desiredRangeRef.current, lastSavedRangeRef.current)) {
+          void savePrivateDrawRange(desiredRangeRef.current);
+          return;
+        }
+
         void refreshPrivateDrawState();
       }
     };
@@ -247,7 +385,36 @@ export function PublicHome({
       window.removeEventListener("focus", syncOnFocus);
       document.removeEventListener("visibilitychange", syncOnFocus);
     };
-  }, [drawMode.kind, refreshPrivateDrawState]);
+  }, [canEditPrivateRange, drawMode.kind, refreshPrivateDrawState, savePrivateDrawRange]);
+
+  useEffect(() => {
+    if (!canEditPrivateRange || spinActiveRef.current) {
+      return;
+    }
+
+    const requestedRange = { from, to };
+    desiredRangeRef.current = requestedRange;
+
+    if (sameRange(requestedRange, lastSavedRangeRef.current)) {
+      return;
+    }
+
+    if (saveRangeTimerRef.current !== null) {
+      window.clearTimeout(saveRangeTimerRef.current);
+    }
+
+    saveRangeTimerRef.current = window.setTimeout(() => {
+      saveRangeTimerRef.current = null;
+      void savePrivateDrawRange(requestedRange);
+    }, 300);
+
+    return () => {
+      if (saveRangeTimerRef.current !== null) {
+        window.clearTimeout(saveRangeTimerRef.current);
+        saveRangeTimerRef.current = null;
+      }
+    };
+  }, [canEditPrivateRange, from, savePrivateDrawRange, to]);
 
   useEffect(() => {
     return () => {
@@ -269,6 +436,10 @@ export function PublicHome({
 
       if (rollerTimerRef.current !== null) {
         window.clearTimeout(rollerTimerRef.current);
+      }
+
+      if (saveRangeTimerRef.current !== null) {
+        window.clearTimeout(saveRangeTimerRef.current);
       }
 
       void audioRef.current?.close();
@@ -678,15 +849,34 @@ export function PublicHome({
     let activeFrom = from;
     let activeTo = to;
     if (drawMode.kind === "private") {
-      const syncedState = await refreshPrivateDrawState();
-      if (!syncedState) {
-        setMessageTone("danger");
-        setMessage("Unable to refresh the live draw range. Please try again.");
-        return;
-      }
+      if (canEditPrivateRange) {
+        if (saveRangeTimerRef.current !== null) {
+          window.clearTimeout(saveRangeTimerRef.current);
+          saveRangeTimerRef.current = null;
+        }
 
-      activeFrom = syncedState.from;
-      activeTo = syncedState.to;
+        const requestedRange = { from, to };
+        const rangeNeedsSave = !sameRange(requestedRange, lastSavedRangeRef.current);
+        const savedState = rangeNeedsSave ? await savePrivateDrawRange(requestedRange) : await refreshPrivateDrawState();
+        if (!savedState) {
+          setMessageTone("danger");
+          setMessage(rangeNeedsSave ? "Live draw range was not saved, so the spin did not start." : "Unable to refresh the live draw range. Please try again.");
+          return;
+        }
+
+        activeFrom = savedState.from;
+        activeTo = savedState.to;
+      } else {
+        const syncedState = await refreshPrivateDrawState();
+        if (!syncedState) {
+          setMessageTone("danger");
+          setMessage("Unable to refresh the live draw range. Please try again.");
+          return;
+        }
+
+        activeFrom = syncedState.from;
+        activeTo = syncedState.to;
+      }
     }
 
     if (rangeInvalid) {
@@ -835,8 +1025,9 @@ export function PublicHome({
 
   function reset() {
     clearSpinTimers();
-    setFrom(settings.defaultFrom);
-    setTo(settings.defaultTo);
+    const resetRange = drawMode.kind === "private" ? lastSavedRangeRef.current : { from: settings.defaultFrom, to: settings.defaultTo };
+    setFrom(resetRange.from);
+    setTo(resetRange.to);
     setWinner(null);
     setHighlightedWinner(null);
     setResult(null);
@@ -845,7 +1036,7 @@ export function PublicHome({
     setConfetti(false);
     setSpinning(false);
     setHasCompletedSpin(false);
-    setRollerNumber(settings.defaultFrom);
+    setRollerNumber(resetRange.from);
     setRollerPhase("READY");
     setRollerTempo("READY");
     rollerSequenceRef.current = [];
@@ -914,9 +1105,19 @@ export function PublicHome({
             </p>
 
             <div className="mt-8 grid grid-cols-2 gap-4">
-              <RangeSelector label="From" value={from} onChange={setFrom} readOnly={drawMode.kind === "private"} />
-              <RangeSelector label="To" value={to} onChange={setTo} readOnly={drawMode.kind === "private"} />
+              <RangeSelector label="From" value={from} onChange={setFrom} readOnly={drawMode.kind === "private" && !canEditPrivateRange} />
+              <RangeSelector label="To" value={to} onChange={setTo} readOnly={drawMode.kind === "private" && !canEditPrivateRange} />
             </div>
+            {canEditPrivateRange && rangeSaveMessage ? (
+              <p
+                className={`mt-3 text-sm font-bold ${
+                  rangeSaveTone === "danger" ? "text-[var(--rose)]" : "text-[#7f8aa3]"
+                }`}
+                role={rangeSaveTone === "danger" ? "alert" : "status"}
+              >
+                {rangeSaveMessage}
+              </p>
+            ) : null}
           </motion.div>
 
           <motion.div initial={false} animate={{ opacity: 1, scale: 1 }} className="relative min-w-0 lg:row-span-2">

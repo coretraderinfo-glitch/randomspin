@@ -67,6 +67,16 @@ export class PrivateDrawStateError extends Error {
   }
 }
 
+export class PrivateDrawRangeConflictError extends Error {
+  currentState: PrivateDrawAudienceState | null;
+
+  constructor(currentState: PrivateDrawAudienceState | null) {
+    super("Live draw range changed. Please review the current range and try again.");
+    this.name = "PrivateDrawRangeConflictError";
+    this.currentState = currentState;
+  }
+}
+
 export class PrivateDrawSlugError extends Error {
   constructor(message: string) {
     super(message);
@@ -77,6 +87,19 @@ export class PrivateDrawSlugError extends Error {
 const publicCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const publicCodeLength = 8;
 const reservedLiveSlugs = new Set(["admin", "api", "faq", "about", "players", "draw", "live", "privacy", "terms"]);
+
+export type PrivateDrawAudienceState = {
+  id: string;
+  publicCode: string;
+  liveSlug: string | null;
+  name: string;
+  minNumber: number;
+  maxNumber: number;
+  mode: PrivateDrawMode;
+  displayStyle: PrivateDrawDisplayStyle;
+  label: string;
+  revision: string;
+};
 
 export function isPrivateDrawMode(value: unknown): value is PrivateDrawMode {
   return value === PRIVATE_DRAW_RANDOM_MODE || value === PRIVATE_DRAW_OPERATOR_MODE;
@@ -171,6 +194,14 @@ function validateDrawRange(minNumber: number, maxNumber: number) {
   }
 }
 
+function validateLiveDrawRange(minNumber: number, maxNumber: number) {
+  validateDrawRange(minNumber, maxNumber);
+
+  if (minNumber < 0 || maxNumber < 0) {
+    throw new SpinValidationError("Live draw range cannot use negative numbers.");
+  }
+}
+
 function getExcludedNumbers(input: PrivateDrawMutationInput) {
   const excludedNumbers =
     input.excludedText !== undefined
@@ -210,6 +241,21 @@ function isValidPendingWinner(draw: NormalizedPrivateDraw, winner: number | null
   } catch {
     return false;
   }
+}
+
+function toPrivateDrawAudienceState(draw: NormalizedPrivateDraw, pendingOperatorWinner = draw.pendingOperatorWinner): PrivateDrawAudienceState {
+  return {
+    id: draw.id,
+    publicCode: draw.publicCode,
+    liveSlug: draw.liveSlug,
+    name: draw.name,
+    minNumber: draw.minNumber,
+    maxNumber: draw.maxNumber,
+    mode: draw.mode,
+    displayStyle: draw.displayStyle,
+    label: getPrivateDrawAudienceLabel(draw.mode, pendingOperatorWinner),
+    revision: draw.updatedAt.toISOString()
+  };
 }
 
 async function assertLiveSlugAvailable(liveSlug: string | null, currentDrawId?: string) {
@@ -265,17 +311,74 @@ export async function getPrivateDrawAudience(publicCode: string) {
     pendingOperatorWinner = null;
   }
 
-  return {
-    id: normalized.id,
-    publicCode: normalized.publicCode,
-    liveSlug: normalized.liveSlug,
-    name: normalized.name,
-    minNumber: normalized.minNumber,
-    maxNumber: normalized.maxNumber,
-    mode: normalized.mode,
-    displayStyle: normalized.displayStyle,
-    label: getPrivateDrawAudienceLabel(normalized.mode, pendingOperatorWinner)
-  };
+  return toPrivateDrawAudienceState(normalized, pendingOperatorWinner);
+}
+
+export async function updatePrivateDrawLiveRange({
+  publicCode,
+  minNumber,
+  maxNumber,
+  revision
+}: {
+  publicCode: string;
+  minNumber: number;
+  maxNumber: number;
+  revision: string;
+}) {
+  validateLiveDrawRange(minNumber, maxNumber);
+
+  const lookup = String(publicCode).trim();
+  const draw = await prisma.privateDraw.findFirst({
+    where: {
+      OR: [{ publicCode: lookup.toUpperCase() }, { liveSlug: lookup.toLowerCase() }]
+    }
+  });
+
+  if (!draw || !draw.isActive || draw.archivedAt) {
+    throw new PrivateDrawNotFoundError();
+  }
+
+  const expectedRevision = new Date(revision);
+  if (Number.isNaN(expectedRevision.getTime())) {
+    throw new SpinValidationError("Live draw range is out of date. Refresh and try again.");
+  }
+
+  const nextDraw = normalizePrivateDraw({
+    ...draw,
+    minNumber,
+    maxNumber
+  });
+  const pendingOperatorWinner = isValidPendingWinner(nextDraw, nextDraw.pendingOperatorWinner) ? nextDraw.pendingOperatorWinner : null;
+  const updatedAt = new Date();
+  const updated = await prisma.privateDraw.updateMany({
+    where: {
+      id: draw.id,
+      isActive: true,
+      archivedAt: null,
+      updatedAt: expectedRevision
+    },
+    data: {
+      minNumber,
+      maxNumber,
+      pendingOperatorWinner,
+      updatedAt
+    }
+  });
+
+  if (updated.count !== 1) {
+    const current = await prisma.privateDraw.findUnique({ where: { id: draw.id } });
+    throw new PrivateDrawRangeConflictError(current && current.isActive && !current.archivedAt ? toPrivateDrawAudienceState(normalizePrivateDraw(current)) : null);
+  }
+
+  return toPrivateDrawAudienceState(
+    normalizePrivateDraw({
+      ...draw,
+      minNumber,
+      maxNumber,
+      pendingOperatorWinner,
+      updatedAt
+    })
+  );
 }
 
 export async function getPrivateDrawForAdmin(id: string) {

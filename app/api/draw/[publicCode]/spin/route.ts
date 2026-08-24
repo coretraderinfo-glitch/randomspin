@@ -21,7 +21,8 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       from: draw.minNumber,
       to: draw.maxNumber,
       label: draw.label,
-      displayStyle: draw.displayStyle
+      displayStyle: draw.displayStyle,
+      revision: draw.revision
     });
   } catch (error) {
     console.error("Private draw state error", error);

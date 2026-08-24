@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { PublicHome } from "@/components/public/PublicHome";
+import { getCurrentAdmin } from "@/lib/auth";
 import { PRIVATE_DRAW_MAXIMUM_RANGE, getPrivateDrawAudience, getPrivateDrawLivePath } from "@/lib/private-draws";
 import { getSiteSettings } from "@/lib/public-data";
 
@@ -28,7 +29,7 @@ export default async function PrivateDrawLivePage({ params }: { params: Promise<
   const nonce = (await headers()).get("x-nonce") ?? undefined;
   const { code: rawCode } = await params;
   const liveCode = normalizeLiveCode(rawCode);
-  const [settings, draw] = await Promise.all([getSiteSettings(), getPrivateDrawAudience(liveCode)]);
+  const [settings, draw, adminSession] = await Promise.all([getSiteSettings(), getPrivateDrawAudience(liveCode), getCurrentAdmin()]);
 
   if (!draw) {
     notFound();
@@ -83,6 +84,9 @@ export default async function PrivateDrawLivePage({ params }: { params: Promise<
           label: draw.label,
           displayStyle: draw.displayStyle,
           spinEndpoint: `/api/draw/${encodeURIComponent(draw.publicCode)}/spin`,
+          rangeEndpoint: `/api/draw/${encodeURIComponent(draw.publicCode)}/range`,
+          rangeRevision: draw.revision,
+          canEditRange: Boolean(adminSession),
           sharePath: canonicalPath
         }}
       />

@@ -337,6 +337,173 @@ describe("public spin experience", () => {
     expect(screen.getByRole("spinbutton", { name: "To" })).toHaveValue(30);
   });
 
+  it("keeps unauthenticated private live range controls read-only", () => {
+    render(
+      <PublicHome
+        settings={{ ...settings, defaultTo: 33 }}
+        initialResults={[]}
+        drawMode={{
+          kind: "private",
+          publicCode: "A7K29P",
+          label: "RANDOM DRAW",
+          spinEndpoint: "/api/draw/A7K29P/spin"
+        }}
+      />
+    );
+
+    expect(screen.getByRole("spinbutton", { name: "From" })).toHaveAttribute("readonly");
+    expect(screen.getByRole("spinbutton", { name: "To" })).toHaveAttribute("readonly");
+  });
+
+  it("authenticated live page saves edited range before spinning", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === "/api/draw/A7K29P/range") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ from: 1, to: 66, label: "RANDOM DRAW", displayStyle: "WHEEL", revision: "2026-08-21T00:01:00.000Z" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          })
+        );
+      }
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            spinId: "spin-24",
+            winner: 24,
+            timestamp: "2026-08-19T09:45:24.000Z",
+            from: 1,
+            to: 66,
+            mode: "RANDOM",
+            nextLabel: "RANDOM DRAW"
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <PublicHome
+        settings={settings}
+        initialResults={[]}
+        drawMode={{
+          kind: "private",
+          publicCode: "A7K29P",
+          label: "RANDOM DRAW",
+          spinEndpoint: "/api/draw/A7K29P/spin",
+          rangeEndpoint: "/api/draw/A7K29P/range",
+          rangeRevision: "2026-08-21T00:00:00.000Z",
+          canEditRange: true
+        }}
+      />
+    );
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "To" }), { target: { value: "066" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    await completeSuccessfulSpin();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/draw/A7K29P/range",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ from: 1, to: 66, revision: "2026-08-21T00:00:00.000Z" })
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/draw/A7K29P/spin", expect.objectContaining({ method: "POST" }));
+    expect(screen.getByRole("spinbutton", { name: "To" })).toHaveValue(66);
+    expectWinnerNumber(24);
+    expect(screen.getByText("1–66")).toBeInTheDocument();
+  });
+
+  it("does not spin when an authenticated live range save fails and restores the authoritative range", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "Live draw range changed. Please review the current range and try again.",
+          current: { from: 1, to: 30, label: "RANDOM DRAW", displayStyle: "WHEEL", revision: "2026-08-21T00:02:00.000Z" }
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <PublicHome
+        settings={settings}
+        initialResults={[]}
+        drawMode={{
+          kind: "private",
+          publicCode: "A7K29P",
+          label: "RANDOM DRAW",
+          spinEndpoint: "/api/draw/A7K29P/spin",
+          rangeEndpoint: "/api/draw/A7K29P/range",
+          rangeRevision: "2026-08-21T00:00:00.000Z",
+          canEditRange: true
+        }}
+      />
+    );
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "To" }), { target: { value: "66" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/draw/A7K29P/range", expect.objectContaining({ method: "PATCH" }));
+    expect(screen.getByRole("spinbutton", { name: "To" })).toHaveValue(30);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText("Live draw range was not saved, so the spin did not start.")).toBeInTheDocument();
+  });
+
+  it("debounces rapid authenticated live range edits so the final value is saved", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ from: 1, to: 30, label: "RANDOM DRAW", displayStyle: "WHEEL", revision: "2026-08-21T00:01:00.000Z" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <PublicHome
+        settings={{ ...settings, defaultTo: 33 }}
+        initialResults={[]}
+        drawMode={{
+          kind: "private",
+          publicCode: "A7K29P",
+          label: "RANDOM DRAW",
+          spinEndpoint: "/api/draw/A7K29P/spin",
+          rangeEndpoint: "/api/draw/A7K29P/range",
+          rangeRevision: "2026-08-21T00:00:00.000Z",
+          canEditRange: true
+        }}
+      />
+    );
+
+    const toInput = screen.getByRole("spinbutton", { name: "To" });
+    fireEvent.change(toInput, { target: { value: "33" } });
+    fireEvent.change(toInput, { target: { value: "32" } });
+    fireEvent.change(toInput, { target: { value: "31" } });
+    fireEvent.change(toInput, { target: { value: "30" } });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/draw/A7K29P/range",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ from: 1, to: 30, revision: "2026-08-21T00:00:00.000Z" })
+      })
+    );
+    expect(screen.getByText("Live range saved.")).toBeInTheDocument();
+  });
+
   it("defaults the public homepage to Wheel and lets the user switch to Number and back without calling the API", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

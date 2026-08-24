@@ -118,6 +118,14 @@ describe("private draw operator mode APIs", () => {
     });
   }
 
+  function liveRangeRequest(body: unknown, origin = "http://localhost:3000") {
+    return new NextRequest("http://localhost:3000/api/draw/A7K29P/range", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+      headers: { "content-type": "application/json", origin }
+    });
+  }
+
   it("operator mode requires admin authentication", async () => {
     mocks.getAdminFromRequest.mockResolvedValue(null);
     const { PUT } = await import("@/app/api/admin/draws/[id]/route");
@@ -279,6 +287,127 @@ describe("private draw operator mode APIs", () => {
 
     expect(response.status).toBe(401);
     expect(mocks.privateDrawUpdate).not.toHaveBeenCalled();
+  });
+
+  it("live range editing requires an authenticated admin session", async () => {
+    mocks.getAdminFromRequest.mockResolvedValue(null);
+    const { PATCH } = await import("@/app/api/draw/[publicCode]/range/route");
+    const response = await PATCH(liveRangeRequest({ from: 1, to: 30, revision: baseDraw.updatedAt.toISOString() }), {
+      params: Promise.resolve({ publicCode: "A7K29P" })
+    });
+
+    expect(response.status).toBe(401);
+    expect(mocks.privateDrawUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("admin live range editing saves normalized values to the same private draw row", async () => {
+    const { PATCH } = await import("@/app/api/draw/[publicCode]/range/route");
+    const response = await PATCH(liveRangeRequest({ from: "01", to: "033", revision: baseDraw.updatedAt.toISOString() }), {
+      params: Promise.resolve({ publicCode: "A7K29P" })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual(expect.objectContaining({ from: 1, to: 33, label: "OPERATOR DRAW", displayStyle: "WHEEL", revision: expect.any(String) }));
+    expect(mocks.privateDrawUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "draw-1",
+          isActive: true,
+          archivedAt: null,
+          updatedAt: baseDraw.updatedAt
+        }),
+        data: expect.objectContaining({ minNumber: 1, maxNumber: 33 })
+      })
+    );
+  });
+
+  it("live range editing rejects invalid ranges without corrupting the draw", async () => {
+    const { PATCH } = await import("@/app/api/draw/[publicCode]/range/route");
+    const descending = await PATCH(liveRangeRequest({ from: 30, to: 1, revision: baseDraw.updatedAt.toISOString() }), {
+      params: Promise.resolve({ publicCode: "A7K29P" })
+    });
+    const negative = await PATCH(liveRangeRequest({ from: -1, to: 30, revision: baseDraw.updatedAt.toISOString() }), {
+      params: Promise.resolve({ publicCode: "A7K29P" })
+    });
+
+    expect(descending.status).toBe(400);
+    expect(negative.status).toBe(400);
+    expect(mocks.privateDrawUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("stale live range revisions cannot overwrite a newer saved range", async () => {
+    const currentRevision = new Date("2026-08-21T00:01:00.000Z");
+    mocks.privateDrawUpdateMany.mockResolvedValue({ count: 0 });
+    mocks.privateDrawFindUnique.mockResolvedValue({ ...baseDraw, minNumber: 1, maxNumber: 30, updatedAt: currentRevision });
+    const { PATCH } = await import("@/app/api/draw/[publicCode]/range/route");
+    const response = await PATCH(liveRangeRequest({ from: 1, to: 33, revision: baseDraw.updatedAt.toISOString() }), {
+      params: Promise.resolve({ publicCode: "A7K29P" })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body).toEqual(
+      expect.objectContaining({
+        error: "Live draw range changed. Please review the current range and try again.",
+        current: expect.objectContaining({ from: 1, to: 30, revision: currentRevision.toISOString() })
+      })
+    );
+  });
+
+  it("live range save is reflected by the admin draw page API and the next spin", async () => {
+    const { PATCH: livePatch } = await import("@/app/api/draw/[publicCode]/range/route");
+    const { GET: adminGet } = await import("@/app/api/admin/draws/[id]/route");
+    const { POST: spinPost } = await import("@/app/api/draw/[publicCode]/spin/route");
+    let currentDraw = {
+      ...baseDraw,
+      minNumber: 1,
+      maxNumber: 33,
+      mode: "RANDOM",
+      pendingOperatorWinner: null,
+      excludedNumbers: Array.from({ length: 33 }, (_, index) => index + 1).filter((value) => value !== 24)
+    };
+
+    mocks.privateDrawFindUnique.mockImplementation(async () => currentDraw);
+    mocks.privateDrawUpdateMany.mockImplementation(async ({ where, data }: { where: { updatedAt?: Date }; data: { minNumber?: number; maxNumber?: number; updatedAt?: Date } }) => {
+      if (where.updatedAt?.toISOString() !== currentDraw.updatedAt.toISOString()) {
+        return { count: 0 };
+      }
+
+      currentDraw = {
+        ...currentDraw,
+        minNumber: data.minNumber ?? currentDraw.minNumber,
+        maxNumber: data.maxNumber ?? currentDraw.maxNumber,
+        updatedAt: data.updatedAt ?? new Date("2026-08-21T00:02:00.000Z")
+      };
+      return { count: 1 };
+    });
+    mocks.privateDrawSpinCreate.mockImplementation(async ({ data }: { data: { requestedMin: number; requestedMax: number; winningNumber: number } }) => ({
+      id: `draw-spin-${data.winningNumber}`,
+      winningNumber: data.winningNumber,
+      createdAt: new Date("2026-08-21T01:02:03.000Z")
+    }));
+
+    const save = await livePatch(liveRangeRequest({ from: 1, to: 30, revision: baseDraw.updatedAt.toISOString() }), {
+      params: Promise.resolve({ publicCode: "A7K29P" })
+    });
+    const admin = await adminGet(
+      new NextRequest("http://localhost:3000/api/admin/draws/draw-1", {
+        headers: { origin: "http://localhost:3000" }
+      }),
+      { params: Promise.resolve({ id: "draw-1" }) }
+    );
+    const spin = await spinPost(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const saveBody = await save.json();
+    const adminBody = await admin.json();
+    const spinBody = await spin.json();
+
+    expect(save.status).toBe(200);
+    expect(saveBody).toEqual(expect.objectContaining({ from: 1, to: 30 }));
+    expect(admin.status).toBe(200);
+    expect(adminBody.draw).toEqual(expect.objectContaining({ minNumber: 1, maxNumber: 30 }));
+    expect(spin.status).toBe(200);
+    expect(spinBody).toEqual(expect.objectContaining({ winner: 24, from: 1, to: 30 }));
   });
 
   it("deactivating a draw prevents audience spins", async () => {
@@ -619,7 +748,8 @@ describe("private draw operator mode APIs", () => {
       maxNumber: 10,
       mode: "OPERATOR",
       displayStyle: "NUMBER_ROLLER",
-      label: "OPERATOR DRAW"
+      label: "OPERATOR DRAW",
+      revision: "2026-08-21T00:00:00.000Z"
     });
     expect(JSON.stringify(draw)).not.toContain("pendingOperatorWinner");
     expect(JSON.stringify(draw)).not.toContain("excludedNumbers");
@@ -639,7 +769,8 @@ describe("private draw operator mode APIs", () => {
       from: 1,
       to: 25,
       label: "OPERATOR DRAW",
-      displayStyle: "NUMBER_ROLLER"
+      displayStyle: "NUMBER_ROLLER",
+      revision: "2026-08-21T00:00:00.000Z"
     });
     expect(JSON.stringify(body)).not.toContain("pendingOperatorWinner");
     expect(JSON.stringify(body)).not.toContain("excludedNumbers");
