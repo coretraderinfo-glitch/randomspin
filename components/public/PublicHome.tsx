@@ -8,7 +8,7 @@ import { Confetti } from "@/components/public/Confetti";
 import { LuckyWheel } from "@/components/public/LuckyWheel";
 import { NumberRollerDisplay } from "@/components/public/NumberRollerDisplay";
 import { PublicGameNav } from "@/components/public/PublicGameNav";
-import { RangeSelector } from "@/components/public/RangeSelector";
+import { RangeSelector, type RangeSelectorHandle } from "@/components/public/RangeSelector";
 import { RecentResults } from "@/components/public/RecentResults";
 import { WinnerModal, type WinnerResult } from "@/components/public/WinnerModal";
 import {
@@ -151,12 +151,19 @@ export function PublicHome({
   const rollerSequenceRef = useRef<number[]>([]);
   const rollerSequenceIndexRef = useRef(0);
   const rollerLastPlaceholderRef = useRef<number | null>(null);
+  const fromRangeSelectorRef = useRef<RangeSelectorHandle | null>(null);
+  const toRangeSelectorRef = useRef<RangeSelectorHandle | null>(null);
   const saveRangeTimerRef = useRef<number | null>(null);
   const saveRangeInFlightRef = useRef<Promise<PrivateDrawStateResponse | null> | null>(null);
   const saveRangeQueuedRef = useRef(false);
   const desiredRangeRef = useRef({ from: settings.defaultFrom, to: settings.defaultTo });
   const lastSavedRangeRef = useRef({ from: settings.defaultFrom, to: settings.defaultTo });
   const rangeRevisionRef = useRef(drawMode.kind === "private" ? drawMode.rangeRevision ?? null : null);
+  const fromRangeEditingRef = useRef(false);
+  const toRangeEditingRef = useRef(false);
+  const fromRangeDirtyRef = useRef(false);
+  const toRangeDirtyRef = useRef(false);
+  const suppressRangeCommitSaveRef = useRef(false);
 
   const isPrivateDraw = drawMode.kind === "private";
   const canEditPrivateRange = drawMode.kind === "private" && drawMode.canEditRange === true && Boolean(drawMode.rangeEndpoint);
@@ -179,6 +186,36 @@ export function PublicHome({
   const showNumberRoller = viewMode === PRIVATE_DRAW_NUMBER_ROLLER_DISPLAY;
   const [rangeSaveMessage, setRangeSaveMessage] = useState<string | null>(null);
   const [rangeSaveTone, setRangeSaveTone] = useState<"neutral" | "danger">("neutral");
+  const [rangeDraftResetKey, setRangeDraftResetKey] = useState(0);
+
+  const hasActiveRangeDraft = useCallback(() => {
+    return (
+      fromRangeEditingRef.current ||
+      toRangeEditingRef.current ||
+      fromRangeDirtyRef.current ||
+      toRangeDirtyRef.current ||
+      fromRangeSelectorRef.current?.isDirty() === true ||
+      toRangeSelectorRef.current?.isDirty() === true ||
+      fromRangeSelectorRef.current?.isEditing() === true ||
+      toRangeSelectorRef.current?.isEditing() === true
+    );
+  }, []);
+
+  const updateFromRangeEditingState = useCallback((editing: boolean) => {
+    fromRangeEditingRef.current = editing;
+  }, []);
+
+  const updateToRangeEditingState = useCallback((editing: boolean) => {
+    toRangeEditingRef.current = editing;
+  }, []);
+
+  const updateFromRangeDirtyState = useCallback((dirty: boolean) => {
+    fromRangeDirtyRef.current = dirty;
+  }, []);
+
+  const updateToRangeDirtyState = useCallback((dirty: boolean) => {
+    toRangeDirtyRef.current = dirty;
+  }, []);
 
   useEffect(() => {
     window.localStorage.setItem("lucky-spin-sound", soundEnabled ? "on" : "off");
@@ -256,7 +293,7 @@ export function PublicHome({
     [settings.maximumAllowedRange]
   );
 
-  const refreshPrivateDrawState = useCallback(async () => {
+  const refreshPrivateDrawState = useCallback(async (options: { forceApply?: boolean } = {}) => {
     if (drawMode.kind !== "private") {
       return null;
     }
@@ -271,8 +308,12 @@ export function PublicHome({
       return null;
     }
 
+    if (canEditPrivateRange && !options.forceApply && hasActiveRangeDraft()) {
+      return data;
+    }
+
     return applyPrivateDrawState(data);
-  }, [applyPrivateDrawState, drawMode]);
+  }, [applyPrivateDrawState, canEditPrivateRange, drawMode, hasActiveRangeDraft]);
 
   const savePrivateDrawRange = useCallback(
     async (requestedRange: { from: number; to: number }) => {
@@ -330,7 +371,7 @@ export function PublicHome({
             if (data && typeof data === "object" && "current" in data && data.current && isPrivateDrawStateResponse(data.current)) {
               applyPrivateDrawState(data.current);
             } else {
-              await refreshPrivateDrawState();
+              await refreshPrivateDrawState({ forceApply: true });
             }
 
             setRangeSaveTone("danger");
@@ -362,6 +403,48 @@ export function PublicHome({
     [applyPrivateDrawState, canEditPrivateRange, drawMode, liveDrawModeLabel, refreshPrivateDrawState, validateEditablePrivateRange, viewMode]
   );
 
+  const commitEditablePrivateRange = useCallback(
+    (range: { from: number; to: number }) => {
+      if (!canEditPrivateRange || suppressRangeCommitSaveRef.current) {
+        return;
+      }
+
+      if (saveRangeTimerRef.current !== null) {
+        window.clearTimeout(saveRangeTimerRef.current);
+        saveRangeTimerRef.current = null;
+      }
+
+      void savePrivateDrawRange(range);
+    },
+    [canEditPrivateRange, savePrivateDrawRange]
+  );
+
+  const restoreEditableRangeDrafts = useCallback(() => {
+    fromRangeSelectorRef.current?.restoreDraft();
+    toRangeSelectorRef.current?.restoreDraft();
+    fromRangeEditingRef.current = false;
+    toRangeEditingRef.current = false;
+    fromRangeDirtyRef.current = false;
+    toRangeDirtyRef.current = false;
+  }, []);
+
+  const commitEditableRangeDrafts = useCallback(() => {
+    suppressRangeCommitSaveRef.current = true;
+    try {
+      const committedFrom = fromRangeSelectorRef.current?.commitDraft();
+      const committedTo = toRangeSelectorRef.current?.commitDraft();
+
+      if (committedFrom === null || committedTo === null) {
+        restoreEditableRangeDrafts();
+        return null;
+      }
+
+      return { from: committedFrom ?? from, to: committedTo ?? to };
+    } finally {
+      suppressRangeCommitSaveRef.current = false;
+    }
+  }, [from, restoreEditableRangeDrafts, to]);
+
   useEffect(() => {
     if (drawMode.kind !== "private") {
       return;
@@ -369,6 +452,10 @@ export function PublicHome({
 
     const syncOnFocus = () => {
       if (!spinActiveRef.current) {
+        if (canEditPrivateRange && hasActiveRangeDraft()) {
+          return;
+        }
+
         if (canEditPrivateRange && !sameRange(desiredRangeRef.current, lastSavedRangeRef.current)) {
           void savePrivateDrawRange(desiredRangeRef.current);
           return;
@@ -385,7 +472,7 @@ export function PublicHome({
       window.removeEventListener("focus", syncOnFocus);
       document.removeEventListener("visibilitychange", syncOnFocus);
     };
-  }, [canEditPrivateRange, drawMode.kind, refreshPrivateDrawState, savePrivateDrawRange]);
+  }, [canEditPrivateRange, drawMode.kind, hasActiveRangeDraft, refreshPrivateDrawState, savePrivateDrawRange]);
 
   useEffect(() => {
     if (!canEditPrivateRange || spinActiveRef.current) {
@@ -855,7 +942,13 @@ export function PublicHome({
           saveRangeTimerRef.current = null;
         }
 
-        const requestedRange = { from, to };
+        const requestedRange = commitEditableRangeDrafts();
+        if (!requestedRange) {
+          setMessageTone("danger");
+          setMessage("Live draw range was not saved, so the spin did not start.");
+          return;
+        }
+
         const rangeNeedsSave = !sameRange(requestedRange, lastSavedRangeRef.current);
         const savedState = rangeNeedsSave ? await savePrivateDrawRange(requestedRange) : await refreshPrivateDrawState();
         if (!savedState) {
@@ -1028,6 +1121,7 @@ export function PublicHome({
     const resetRange = drawMode.kind === "private" ? lastSavedRangeRef.current : { from: settings.defaultFrom, to: settings.defaultTo };
     setFrom(resetRange.from);
     setTo(resetRange.to);
+    setRangeDraftResetKey((current) => current + 1);
     setWinner(null);
     setHighlightedWinner(null);
     setResult(null);
@@ -1105,8 +1199,28 @@ export function PublicHome({
             </p>
 
             <div className="mt-8 grid grid-cols-2 gap-4">
-              <RangeSelector label="From" value={from} onChange={setFrom} readOnly={drawMode.kind === "private" && !canEditPrivateRange} />
-              <RangeSelector label="To" value={to} onChange={setTo} readOnly={drawMode.kind === "private" && !canEditPrivateRange} />
+              <RangeSelector
+                ref={fromRangeSelectorRef}
+                label="From"
+                value={from}
+                onChange={setFrom}
+                onCommit={(value) => commitEditablePrivateRange({ from: value, to })}
+                onEditingChange={updateFromRangeEditingState}
+                onDirtyChange={updateFromRangeDirtyState}
+                resetKey={rangeDraftResetKey}
+                readOnly={drawMode.kind === "private" && !canEditPrivateRange}
+              />
+              <RangeSelector
+                ref={toRangeSelectorRef}
+                label="To"
+                value={to}
+                onChange={setTo}
+                onCommit={(value) => commitEditablePrivateRange({ from, to: value })}
+                onEditingChange={updateToRangeEditingState}
+                onDirtyChange={updateToRangeDirtyState}
+                resetKey={rangeDraftResetKey}
+                readOnly={drawMode.kind === "private" && !canEditPrivateRange}
+              />
             </div>
             {canEditPrivateRange && rangeSaveMessage ? (
               <p

@@ -1,6 +1,14 @@
 "use client";
 
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Minus, Plus } from "lucide-react";
+
+export type RangeSelectorHandle = {
+  commitDraft: () => number | null;
+  restoreDraft: () => void;
+  isDirty: () => boolean;
+  isEditing: () => boolean;
+};
 
 type RangeSelectorProps = {
   label: string;
@@ -8,16 +16,141 @@ type RangeSelectorProps = {
   min?: number;
   max?: number;
   onChange: (value: number) => void;
+  onCommit?: (value: number) => void;
+  onEditingChange?: (editing: boolean) => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  resetKey?: number;
   readOnly?: boolean;
 };
 
-export function RangeSelector({ label, value, min = -1_000_000, max = 1_000_000, onChange, readOnly = false }: RangeSelectorProps) {
+function clampValue(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+export const RangeSelector = forwardRef<RangeSelectorHandle, RangeSelectorProps>(function RangeSelector(
+  { label, value, min = -1_000_000, max = 1_000_000, onChange, onCommit, onEditingChange, onDirtyChange, resetKey = 0, readOnly = false },
+  ref
+) {
+  const [draftText, setDraftText] = useState(String(value));
+  const [editing, setEditing] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const previousResetKeyRef = useRef(resetKey);
+
+  useEffect(() => {
+    if (!editing && !dirty) {
+      setDraftText(String(value));
+    }
+  }, [dirty, editing, value]);
+
+  useEffect(() => {
+    if (resetKey === previousResetKeyRef.current) {
+      return;
+    }
+
+    previousResetKeyRef.current = resetKey;
+    setDraftText(String(value));
+    setDirty(false);
+    setEditing(false);
+    onDirtyChange?.(false);
+    onEditingChange?.(false);
+  }, [onDirtyChange, onEditingChange, resetKey, value]);
+
+  function setEditingState(next: boolean) {
+    setEditing(next);
+    onEditingChange?.(next);
+  }
+
+  function setDirtyState(next: boolean) {
+    setDirty(next);
+    onDirtyChange?.(next);
+  }
+
+  function parseDraft() {
+    const trimmed = draftText.trim();
+    if (!/^-?\d+$/.test(trimmed)) {
+      return null;
+    }
+
+    const parsed = Number(trimmed);
+    if (!Number.isSafeInteger(parsed)) {
+      return null;
+    }
+
+    return clampValue(parsed, min, max);
+  }
+
+  function commitDraft() {
+    if (readOnly) {
+      return value;
+    }
+
+    const next = parseDraft();
+    if (next === null) {
+      setDraftText(String(value));
+      setDirtyState(false);
+      setEditingState(false);
+      return null;
+    }
+
+    setDraftText(String(next));
+    setDirtyState(false);
+    setEditingState(false);
+    onChange(next);
+    onCommit?.(next);
+    return next;
+  }
+
+  function restoreDraft() {
+    setDraftText(String(value));
+    setDirtyState(false);
+    setEditingState(false);
+  }
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      commitDraft,
+      restoreDraft,
+      isDirty: () => dirty,
+      isEditing: () => editing
+    })
+  );
+
   function update(next: number) {
     if (readOnly || !Number.isFinite(next) || !Number.isInteger(next)) {
       return;
     }
 
-    onChange(Math.max(min, Math.min(max, next)));
+    const normalized = clampValue(next, min, max);
+    setDraftText(String(normalized));
+    setDirtyState(false);
+    setEditingState(false);
+    onChange(normalized);
+    onCommit?.(normalized);
+  }
+
+  function updateText(next: string) {
+    if (readOnly) {
+      return;
+    }
+
+    if (!/^-?\d*$/.test(next)) {
+      return;
+    }
+
+    setDraftText(next);
+    setDirtyState(next !== String(value));
+
+    if (/^-?\d+$/.test(next)) {
+      const parsed = Number(next);
+      if (Number.isSafeInteger(parsed)) {
+        onChange(clampValue(parsed, min, max));
+      }
+    }
+  }
+
+  function step(delta: number) {
+    update((parseDraft() ?? value) + delta);
   }
 
   return (
@@ -27,7 +160,7 @@ export function RangeSelector({ label, value, min = -1_000_000, max = 1_000_000,
         <button
           type="button"
           className="focus-ring grid h-12 place-items-center text-[#f6d98f] transition hover:bg-white/10"
-          onClick={() => update(value - 1)}
+          onClick={() => step(-1)}
           aria-label={`Decrease ${label}`}
           disabled={readOnly}
         >
@@ -37,8 +170,25 @@ export function RangeSelector({ label, value, min = -1_000_000, max = 1_000_000,
           className="number-input h-12 w-full border-x border-white/10 bg-transparent px-2 text-center text-xl font-black text-white outline-none"
           type="number"
           inputMode="numeric"
-          value={value}
-          onChange={(event) => update(Number(event.target.value))}
+          value={draftText}
+          onFocus={() => setEditingState(true)}
+          onChange={(event) => updateText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commitDraft();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              restoreDraft();
+            }
+          }}
+          onBlur={() => {
+            if (dirty) {
+              commitDraft();
+            } else {
+              setEditingState(false);
+            }
+          }}
           readOnly={readOnly}
           aria-readonly={readOnly}
           aria-label={label}
@@ -46,7 +196,7 @@ export function RangeSelector({ label, value, min = -1_000_000, max = 1_000_000,
         <button
           type="button"
           className="focus-ring grid h-12 place-items-center text-[#f6d98f] transition hover:bg-white/10"
-          onClick={() => update(value + 1)}
+          onClick={() => step(1)}
           aria-label={`Increase ${label}`}
           disabled={readOnly}
         >
@@ -55,4 +205,4 @@ export function RangeSelector({ label, value, min = -1_000_000, max = 1_000_000,
       </span>
     </label>
   );
-}
+});

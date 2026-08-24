@@ -340,7 +340,7 @@ describe("public spin experience", () => {
   it("keeps unauthenticated private live range controls read-only", () => {
     render(
       <PublicHome
-        settings={{ ...settings, defaultTo: 33 }}
+        settings={settings}
         initialResults={[]}
         drawMode={{
           kind: "private",
@@ -353,6 +353,150 @@ describe("public spin experience", () => {
 
     expect(screen.getByRole("spinbutton", { name: "From" })).toHaveAttribute("readonly");
     expect(screen.getByRole("spinbutton", { name: "To" })).toHaveAttribute("readonly");
+  });
+
+  it("authenticated private live range inputs are editable DOM controls with draft text", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <PublicHome
+        settings={{ ...settings, defaultTo: 10 }}
+        initialResults={[]}
+        drawMode={{
+          kind: "private",
+          publicCode: "A7K29P",
+          label: "RANDOM DRAW",
+          spinEndpoint: "/api/draw/A7K29P/spin",
+          rangeEndpoint: "/api/draw/A7K29P/range",
+          rangeRevision: "2026-08-21T00:00:00.000Z",
+          canEditRange: true
+        }}
+      />
+    );
+
+    const toInput = screen.getByRole("spinbutton", { name: "To" });
+    expect(toInput).not.toHaveAttribute("readonly");
+    expect(toInput).toHaveAttribute("inputmode", "numeric");
+
+    fireEvent.focus(toInput);
+    fireEvent.change(toInput, { target: { value: "" } });
+    expect(toInput).toHaveDisplayValue("");
+
+    window.dispatchEvent(new Event("focus"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(toInput).toHaveDisplayValue("");
+
+    fireEvent.blur(toInput);
+    expect(toInput).toHaveValue(10);
+  });
+
+  it("authenticated live range commits typing, buttons, leading zeros, and spin-after-edit in order", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/draw/A7K29P/range") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { from: number; to: number };
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              from: body.from,
+              to: body.to,
+              label: "RANDOM DRAW",
+              displayStyle: "WHEEL",
+              revision: `2026-08-21T00:00:${String(body.to).padStart(2, "0")}.000Z`
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          )
+        );
+      }
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            spinId: "spin-6",
+            winner: 6,
+            timestamp: "2026-08-19T09:45:06.000Z",
+            from: 1,
+            to: 6,
+            mode: "RANDOM",
+            nextLabel: "RANDOM DRAW"
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <PublicHome
+        settings={{ ...settings, defaultTo: 10 }}
+        initialResults={[]}
+        drawMode={{
+          kind: "private",
+          publicCode: "A7K29P",
+          label: "RANDOM DRAW",
+          spinEndpoint: "/api/draw/A7K29P/spin",
+          rangeEndpoint: "/api/draw/A7K29P/range",
+          rangeRevision: "2026-08-21T00:00:00.000Z",
+          canEditRange: true
+        }}
+      />
+    );
+
+    const toInput = screen.getByRole("spinbutton", { name: "To" });
+    fireEvent.focus(toInput);
+    fireEvent.change(toInput, { target: { value: "9" } });
+    expect(toInput).toHaveValue(9);
+    fireEvent.keyDown(toInput, { key: "Enter" });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/draw/A7K29P/range",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ from: 1, to: 9, revision: "2026-08-21T00:00:00.000Z" }) })
+    );
+    expect(toInput).toHaveValue(9);
+
+    fireEvent.click(screen.getByRole("button", { name: "Decrease To" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/draw/A7K29P/range",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ from: 1, to: 8, revision: "2026-08-21T00:00:09.000Z" }) })
+    );
+    expect(toInput).toHaveValue(8);
+
+    fireEvent.focus(toInput);
+    fireEvent.change(toInput, { target: { value: "07" } });
+    expect(toInput).toHaveDisplayValue("07");
+    fireEvent.blur(toInput);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/draw/A7K29P/range",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ from: 1, to: 7, revision: "2026-08-21T00:00:08.000Z" }) })
+    );
+    expect(toInput).toHaveValue(7);
+
+    fireEvent.focus(toInput);
+    fireEvent.change(toInput, { target: { value: "6" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    await completeSuccessfulSpin();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/api/draw/A7K29P/range",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ from: 1, to: 6, revision: "2026-08-21T00:00:07.000Z" }) })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(5, "/api/draw/A7K29P/spin", expect.objectContaining({ method: "POST" }));
+    expectWinnerNumber(6);
+    expect(screen.getByText("1–6")).toBeInTheDocument();
   });
 
   it("authenticated live page saves edited range before spinning", async () => {
