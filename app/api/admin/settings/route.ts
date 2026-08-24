@@ -3,6 +3,7 @@ import { z } from "zod";
 import { logAdminAudit } from "@/lib/admin-audit";
 import { getAdminFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { MAX_DRAW_RANGE_SIZE } from "@/lib/draw-range";
 import { jsonError, requireSameOrigin } from "@/lib/security";
 import { isValidTimeZone } from "@/lib/timezone";
 
@@ -20,7 +21,7 @@ const settingsSchema = z.object({
   recentResultCount: z.number().int().min(1).max(20),
   defaultFrom: z.number().int(),
   defaultTo: z.number().int(),
-  maximumAllowedRange: z.number().int().min(2).max(1000),
+  maximumAllowedRange: z.number().int().min(2).max(MAX_DRAW_RANGE_SIZE),
   publicDisclosureMessage: z.string().min(1).max(220),
   timezone: z.string().min(1).max(80),
   contactEmail: z.string().email().nullable().optional()

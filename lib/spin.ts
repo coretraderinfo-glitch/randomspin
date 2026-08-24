@@ -1,7 +1,8 @@
 import { randomInt } from "node:crypto";
 import { z } from "zod";
+import { MAX_DRAW_RANGE_SIZE, validateDrawRangeValues } from "@/lib/draw-range";
 
-export const DEFAULT_MAXIMUM_RANGE = 1000;
+export const DEFAULT_MAXIMUM_RANGE = MAX_DRAW_RANGE_SIZE;
 
 export const spinRequestSchema = z.object({
   from: z.coerce.number().int().min(-1_000_000).max(1_000_000),
@@ -31,13 +32,10 @@ export class SpinValidationError extends Error {
 
 export function buildEligiblePool(from: number, to: number, rules: WheelRules) {
   const maximumAllowedRange = rules.maximumAllowedRange ?? DEFAULT_MAXIMUM_RANGE;
+  const validationMessage = validateDrawRangeValues({ from, to, maximumRangeSize: maximumAllowedRange });
 
-  if (from >= to) {
-    throw new SpinValidationError("FROM must be lower than TO.");
-  }
-
-  if (to - from + 1 > maximumAllowedRange) {
-    throw new SpinValidationError(`Please choose a range of ${maximumAllowedRange} numbers or fewer.`);
+  if (validationMessage) {
+    throw new SpinValidationError(validationMessage);
   }
 
   const effectiveMin = Math.max(from, rules.configMin);

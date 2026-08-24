@@ -14,6 +14,10 @@ type NumberRollerDisplayProps = {
 export function NumberRollerDisplay({ from, to, currentNumber, phase, tempo, spinning }: NumberRollerDisplayProps) {
   const status = phase === "WINNING" ? "WINNING NUMBER" : spinning ? "RANDOMIZING" : "READY";
   const displayValue = phase === "READY" ? "?" : currentNumber.toString();
+  const fourDigitValue = displayValue.replace("-", "").length >= 4;
+  const valueSizeClassName = fourDigitValue
+    ? "number-roller-value-four-digit text-[4.25rem] sm:text-[5.75rem] lg:text-[7rem]"
+    : "text-7xl sm:text-8xl lg:text-9xl";
   const orbClassName = [
     "number-roller-orb relative mx-auto grid aspect-square w-full min-w-0 place-items-center overflow-hidden rounded-full",
     phase === "ROLLING" ? "is-rolling" : "",
@@ -58,7 +62,7 @@ export function NumberRollerDisplay({ from, to, currentNumber, phase, tempo, spi
         >
           <span
             key={displayValue}
-            className={`number-roller-value gold-text block font-[var(--font-display)] text-7xl font-black leading-none sm:text-8xl lg:text-9xl ${
+            className={`number-roller-value gold-text block font-[var(--font-display)] font-black leading-none ${valueSizeClassName} ${
               spinning ? "is-changing" : ""
             }`}
             data-testid="number-roller-value"

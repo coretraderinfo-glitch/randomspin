@@ -28,9 +28,9 @@ describe("mobile rendering basics", () => {
   it("keeps the number roller and winner modal usable in compact mobile viewports", () => {
     render(
       <div style={{ width: 375 }}>
-        <NumberRollerDisplay from={1} to={30} currentNumber={24} phase="WINNING" tempo="WINNING" spinning={false} />
+        <NumberRollerDisplay from={1} to={1000} currentNumber={1000} phase="WINNING" tempo="WINNING" spinning={false} />
         <WinnerModal
-          result={{ winner: 24, from: 1, to: 30, timestamp: "2026-08-24T12:00:00.000Z", spinId: "spin-1" }}
+          result={{ winner: 1000, from: 1, to: 1000, timestamp: "2026-08-24T12:00:00.000Z", spinId: "spin-1" }}
           onClose={vi.fn()}
           onShare={vi.fn()}
         />
@@ -40,8 +40,26 @@ describe("mobile rendering basics", () => {
     expect(screen.getByTestId("number-roller-display")).toHaveStyle({
       maxWidth: "min(clamp(260px, 62vw, 500px), calc(100svh - 5.75rem))"
     });
+    expect(screen.getByTestId("number-roller-value")).toHaveTextContent("1000");
+    expect(screen.getByText((_, element) => element?.textContent === "#1000")).toBeInTheDocument();
     expect(screen.getByRole("dialog")).toHaveClass("overflow-y-auto");
     expect(screen.getByRole("button", { name: "Close result" })).toHaveClass("size-11");
+  });
+
+  it("uses 4-digit-safe number roller sizing only for 1000-style values", () => {
+    const { rerender } = render(<NumberRollerDisplay from={1} to={1000} currentNumber={1000} phase="WINNING" tempo="WINNING" spinning={false} />);
+
+    expect(screen.getByTestId("number-roller-value")).toHaveTextContent("1000");
+    expect(screen.getByTestId("number-roller-value")).toHaveClass("number-roller-value-four-digit");
+    expect(screen.getByTestId("number-roller-value")).toHaveClass("text-[4.25rem]");
+    expect(screen.getByTestId("number-roller-value")).toHaveClass("sm:text-[5.75rem]");
+    expect(screen.getByTestId("number-roller-value")).toHaveClass("lg:text-[7rem]");
+
+    rerender(<NumberRollerDisplay from={1} to={1000} currentNumber={999} phase="WINNING" tempo="WINNING" spinning={false} />);
+
+    expect(screen.getByTestId("number-roller-value")).toHaveTextContent("999");
+    expect(screen.getByTestId("number-roller-value")).not.toHaveClass("number-roller-value-four-digit");
+    expect(screen.getByTestId("number-roller-value")).toHaveClass("text-7xl");
   });
 
   it("uses responsive livestream layout contracts for phone, iPad, and short landscape screens", () => {

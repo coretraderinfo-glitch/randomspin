@@ -39,10 +39,10 @@ describe("spin selection", () => {
         configMax: 30,
         excludedNumbers: []
       })
-    ).toThrow("FROM must be lower than TO.");
+    ).toThrow("FROM must be smaller than TO.");
   });
 
-  it("rejects ranges larger than the allowed maximum", () => {
+  it("rejects values above the supported maximum number", () => {
     expect(() =>
       buildEligiblePool(1, 1001, {
         configMin: 1,
@@ -50,7 +50,19 @@ describe("spin selection", () => {
         excludedNumbers: [],
         maximumAllowedRange: 1000
       })
-    ).toThrow("Please choose a range of 1000 numbers or fewer.");
+    ).toThrow("Maximum supported number is 1,000.");
+  });
+
+  it.each([100, 101, 250, 500, 1000])("accepts the shared product range 1-%i", (to) => {
+    const pool = buildEligiblePool(1, to, {
+      configMin: 1,
+      configMax: to,
+      excludedNumbers: [],
+      maximumAllowedRange: 1000
+    });
+
+    expect(pool).toHaveLength(to);
+    expect(pool.at(-1)).toBe(to);
   });
 
   it("returns no eligible pool when all requested numbers are excluded", () => {

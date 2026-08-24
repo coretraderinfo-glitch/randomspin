@@ -562,6 +562,22 @@ describe("private draw operator mode APIs", () => {
     );
   });
 
+  it.each([100, 101, 250, 500, 1000])("admin live range editing accepts private 1-%i", async (to) => {
+    const { PATCH } = await import("@/app/api/draw/[publicCode]/range/route");
+    const response = await PATCH(liveRangeRequest({ from: 1, to, revision: baseDraw.updatedAt.toISOString() }), {
+      params: Promise.resolve({ publicCode: "A7K29P" })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual(expect.objectContaining({ from: 1, to }));
+    expect(mocks.privateDrawUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ minNumber: 1, maxNumber: to })
+      })
+    );
+  });
+
   it("live range editing rejects invalid ranges without corrupting the draw", async () => {
     const { PATCH } = await import("@/app/api/draw/[publicCode]/range/route");
     const descending = await PATCH(liveRangeRequest({ from: 30, to: 1, revision: baseDraw.updatedAt.toISOString() }), {
@@ -573,6 +589,18 @@ describe("private draw operator mode APIs", () => {
 
     expect(descending.status).toBe(400);
     expect(negative.status).toBe(400);
+    expect(mocks.privateDrawUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("live range editing rejects private 1-1001 clearly without clamping", async () => {
+    const { PATCH } = await import("@/app/api/draw/[publicCode]/range/route");
+    const response = await PATCH(liveRangeRequest({ from: 1, to: 1001, revision: baseDraw.updatedAt.toISOString() }), {
+      params: Promise.resolve({ publicCode: "A7K29P" })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("Maximum supported number is 1,000.");
     expect(mocks.privateDrawUpdateMany).not.toHaveBeenCalled();
   });
 
@@ -778,7 +806,7 @@ describe("private draw operator mode APIs", () => {
     );
   });
 
-  it.each([3, 28, 66, 100])("private operator fallback accepts range 1-%i", async (maxNumber) => {
+  it.each([3, 28, 66, 100, 101, 250, 500, 1000])("private operator fallback accepts range 1-%i", async (maxNumber) => {
     const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
     mocks.privateDrawFindUnique.mockResolvedValue({
       ...baseDraw,
@@ -946,7 +974,19 @@ describe("private draw operator mode APIs", () => {
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe("FROM must be lower than TO.");
+    expect(body.error).toBe("FROM must be smaller than TO.");
+    expect(mocks.privateDrawSpinCreate).not.toHaveBeenCalled();
+  });
+
+  it("private spin rejects forged ranges above 1000 clearly", async () => {
+    const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
+    mocks.privateDrawFindUnique.mockResolvedValue({ ...baseDraw, minNumber: 1, maxNumber: 1001, mode: "OPERATOR", pendingOperatorWinner: null });
+
+    const response = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("Maximum supported number is 1,000.");
     expect(mocks.privateDrawSpinCreate).not.toHaveBeenCalled();
   });
 

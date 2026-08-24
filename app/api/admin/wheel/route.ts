@@ -3,6 +3,7 @@ import { z } from "zod";
 import { logAdminAudit } from "@/lib/admin-audit";
 import { getAdminFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { MAX_DRAW_RANGE_SIZE, validateDrawRangeValues } from "@/lib/draw-range";
 import { normalizeExcludedNumbers, serializeExcludedNumbers } from "@/lib/excluded-numbers";
 import { jsonError, requireSameOrigin } from "@/lib/security";
 import { parseExcludedNumbers, SpinValidationError } from "@/lib/spin";
@@ -55,12 +56,9 @@ export async function PUT(request: NextRequest) {
     }
 
     const { minNumber, maxNumber } = parsed.data;
-    if (minNumber >= maxNumber) {
-      return jsonError("Minimum number must be lower than maximum number.", 400);
-    }
-
-    if (maxNumber - minNumber + 1 > 1000) {
-      return jsonError("The active wheel range can include at most 1,000 numbers.", 400);
+    const rangeValidationMessage = validateDrawRangeValues({ from: minNumber, to: maxNumber, maximumRangeSize: MAX_DRAW_RANGE_SIZE });
+    if (rangeValidationMessage) {
+      return jsonError(rangeValidationMessage, 400);
     }
 
     const excludedNumbers =

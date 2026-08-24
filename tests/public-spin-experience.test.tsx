@@ -561,6 +561,100 @@ describe("public spin experience", () => {
     expect(screen.getByText("1–66")).toBeInTheDocument();
   });
 
+  it("authenticated live page accepts 1-101 before spinning", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === "/api/draw/A7K29P/range") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ from: 1, to: 101, label: "RANDOM DRAW", displayStyle: "WHEEL", revision: "2026-08-21T00:01:01.000Z" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          })
+        );
+      }
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            spinId: "spin-101",
+            winner: 101,
+            timestamp: "2026-08-19T09:45:24.000Z",
+            from: 1,
+            to: 101,
+            mode: "RANDOM",
+            nextLabel: "RANDOM DRAW"
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <PublicHome
+        settings={settings}
+        initialResults={[]}
+        drawMode={{
+          kind: "private",
+          publicCode: "A7K29P",
+          label: "RANDOM DRAW",
+          spinEndpoint: "/api/draw/A7K29P/spin",
+          rangeEndpoint: "/api/draw/A7K29P/range",
+          rangeRevision: "2026-08-21T00:00:00.000Z",
+          canEditRange: true
+        }}
+      />
+    );
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "To" }), { target: { value: "101" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    await completeSuccessfulSpin();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/draw/A7K29P/range",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ from: 1, to: 101, revision: "2026-08-21T00:00:00.000Z" })
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/draw/A7K29P/spin", expect.objectContaining({ method: "POST" }));
+    expect(screen.getByRole("spinbutton", { name: "To" })).toHaveValue(101);
+    expectWinnerNumber(101);
+    expect(screen.getByText("1–101")).toBeInTheDocument();
+  });
+
+  it("authenticated live page rejects 1-1001 clearly before sending range save or spin", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <PublicHome
+        settings={settings}
+        initialResults={[]}
+        drawMode={{
+          kind: "private",
+          publicCode: "A7K29P",
+          label: "RANDOM DRAW",
+          spinEndpoint: "/api/draw/A7K29P/spin",
+          rangeEndpoint: "/api/draw/A7K29P/range",
+          rangeRevision: "2026-08-21T00:00:00.000Z",
+          canEditRange: true
+        }}
+      />
+    );
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "To" }), { target: { value: "1001" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getAllByText("Maximum supported number is 1,000.").length).toBeGreaterThan(0);
+    expect(screen.getByRole("spinbutton", { name: "To" })).toHaveValue(1001);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("does not spin when an authenticated live range save fails and restores the authoritative range", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -599,7 +693,7 @@ describe("public spin experience", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/draw/A7K29P/range", expect.objectContaining({ method: "PATCH" }));
     expect(screen.getByRole("spinbutton", { name: "To" })).toHaveValue(30);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Unable to update range").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Live draw range changed. Please review the current range and try again.").length).toBeGreaterThan(0);
   });
 
   it("debounces rapid authenticated live range edits so the final value is saved", async () => {

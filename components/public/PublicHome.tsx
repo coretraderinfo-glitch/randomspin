@@ -11,6 +11,7 @@ import { PublicGameNav } from "@/components/public/PublicGameNav";
 import { RangeSelector, type RangeSelectorHandle } from "@/components/public/RangeSelector";
 import { RecentResults } from "@/components/public/RecentResults";
 import { WinnerModal, type WinnerResult } from "@/components/public/WinnerModal";
+import { validateDrawRangeValues } from "@/lib/draw-range";
 import {
   PRIVATE_DRAW_NUMBER_ROLLER_DISPLAY,
   PRIVATE_DRAW_WHEEL_DISPLAY,
@@ -164,15 +165,23 @@ export function PublicHome({
   const fromRangeDirtyRef = useRef(false);
   const toRangeDirtyRef = useRef(false);
   const suppressRangeCommitSaveRef = useRef(false);
+  const lastRangeSaveErrorRef = useRef<string | null>(null);
 
   const isPrivateDraw = drawMode.kind === "private";
   const canEditPrivateRange = drawMode.kind === "private" && drawMode.canEditRange === true && Boolean(drawMode.rangeEndpoint);
-  const rangeInvalid = useMemo(() => !isPrivateDraw && (from >= to || to - from + 1 > settings.maximumAllowedRange), [
+  const publicRangeValidationMessage = useMemo(() => {
+    if (isPrivateDraw) {
+      return null;
+    }
+
+    return validateDrawRangeValues({ from, to, maximumRangeSize: settings.maximumAllowedRange });
+  }, [
     isPrivateDraw,
     from,
     to,
     settings.maximumAllowedRange
   ]);
+  const rangeInvalid = publicRangeValidationMessage !== null;
   const spinButtonLabel = hasCompletedSpin ? "SPIN AGAIN" : "SPIN";
   const spinEndpoint = drawMode.spinEndpoint ?? "/api/spin";
   const initialDrawModeLabel = drawMode.kind === "private" ? drawMode.label ?? "RANDOM DRAW" : drawMode.label ?? "RANDOM DRAW";
@@ -272,23 +281,11 @@ export function PublicHome({
 
   const validateEditablePrivateRange = useCallback(
     (range: { from: number; to: number }) => {
-      if (!Number.isInteger(range.from) || !Number.isInteger(range.to)) {
-        return "Live draw range must use whole numbers.";
-      }
-
       if (range.from < 0 || range.to < 0) {
         return "Live draw range cannot use negative numbers.";
       }
 
-      if (range.from >= range.to) {
-        return "FROM must be lower than TO.";
-      }
-
-      if (range.to - range.from + 1 > settings.maximumAllowedRange) {
-        return `Please choose a range of ${settings.maximumAllowedRange} numbers or fewer.`;
-      }
-
-      return null;
+      return validateDrawRangeValues({ from: range.from, to: range.to, maximumRangeSize: settings.maximumAllowedRange });
     },
     [settings.maximumAllowedRange]
   );
@@ -325,8 +322,9 @@ export function PublicHome({
       desiredRangeRef.current = requestedRange;
       const validationMessage = validateEditablePrivateRange(requestedRange);
       if (validationMessage) {
+        lastRangeSaveErrorRef.current = validationMessage;
         setRangeSaveTone("danger");
-        setRangeSaveMessage("Unable to update range");
+        setRangeSaveMessage(validationMessage);
         return null;
       }
 
@@ -350,6 +348,7 @@ export function PublicHome({
 
         for (;;) {
           saveRangeQueuedRef.current = false;
+          lastRangeSaveErrorRef.current = null;
           setRangeSaveMessage(null);
 
           const response = await fetch(rangeEndpoint, {
@@ -373,12 +372,15 @@ export function PublicHome({
               await refreshPrivateDrawState({ forceApply: true });
             }
 
+            const errorMessage = data && typeof data === "object" && "error" in data && typeof data.error === "string" ? data.error : "Unable to update range";
+            lastRangeSaveErrorRef.current = errorMessage;
             setRangeSaveTone("danger");
-            setRangeSaveMessage("Unable to update range");
+            setRangeSaveMessage(errorMessage);
             return null;
           }
 
           const savedState = applyPrivateDrawState(data);
+          lastRangeSaveErrorRef.current = null;
           setRangeSaveMessage(null);
 
           if (!saveRangeQueuedRef.current || sameRange(desiredRangeRef.current, { from: data.from, to: data.to })) {
@@ -943,7 +945,17 @@ export function PublicHome({
         const requestedRange = commitEditableRangeDrafts();
         if (!requestedRange) {
           setMessageTone("danger");
-          setMessage("Unable to update range");
+          setMessage("Enter a whole number.");
+          return;
+        }
+
+        const validationMessage = validateEditablePrivateRange(requestedRange);
+        if (validationMessage) {
+          setRangeSaveTone("danger");
+          setRangeSaveMessage(validationMessage);
+          setMessageTone("danger");
+          setMessage(validationMessage);
+          lastRangeSaveErrorRef.current = validationMessage;
           return;
         }
 
@@ -951,7 +963,7 @@ export function PublicHome({
         const savedState = rangeNeedsSave ? await savePrivateDrawRange(requestedRange) : await refreshPrivateDrawState();
         if (!savedState) {
           setMessageTone("danger");
-          setMessage(rangeNeedsSave ? "Unable to update range" : "Unable to refresh the live draw range. Please try again.");
+          setMessage(rangeNeedsSave ? lastRangeSaveErrorRef.current ?? "Unable to update range" : "Unable to refresh the live draw range. Please try again.");
           return;
         }
 
@@ -972,11 +984,7 @@ export function PublicHome({
 
     if (rangeInvalid) {
       setMessageTone("danger");
-      setMessage(
-        from >= to
-          ? "FROM must be lower than TO."
-          : `Please choose a range of ${settings.maximumAllowedRange} numbers or fewer.`
-      );
+      setMessage(publicRangeValidationMessage);
       return;
     }
 

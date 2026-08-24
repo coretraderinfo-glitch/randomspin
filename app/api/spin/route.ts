@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db";
+import { MAX_DRAW_RANGE_SIZE, WHOLE_NUMBER_RANGE_ERROR } from "@/lib/draw-range";
 import { env, isDatabaseConfigured } from "@/lib/env";
 import { rateLimit } from "@/lib/rate-limit";
 import { getClientIp, hashIp, jsonError, sanitizeUserAgent } from "@/lib/security";
@@ -23,7 +24,7 @@ export async function POST(request: NextRequest) {
     const parsed = spinRequestSchema.safeParse(body);
 
     if (!parsed.success) {
-      return jsonError("Please enter a valid number range.", 400);
+      return jsonError(WHOLE_NUMBER_RANGE_ERROR, 400);
     }
 
     const [config, settings] = await Promise.all([getActiveWheelConfiguration(), getSiteSettings()]);
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
       configMin: parsed.data.from,
       configMax: parsed.data.to,
       excludedNumbers: [],
-      maximumAllowedRange: settings.maximumAllowedRange
+      maximumAllowedRange: MAX_DRAW_RANGE_SIZE
     });
 
     if (!isDatabaseConfigured()) {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { logAdminAudit } from "@/lib/admin-audit";
 import { getAdminFromRequest } from "@/lib/auth";
+import { WHOLE_NUMBER_RANGE_ERROR } from "@/lib/draw-range";
 import { PrivateDrawNotFoundError, PrivateDrawRangeConflictError, getPrivateDrawAudience, updatePrivateDrawLiveRange } from "@/lib/private-draws";
 import { jsonError, requireSameOrigin } from "@/lib/security";
 import { SpinValidationError } from "@/lib/spin";
@@ -28,7 +29,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     const parsed = liveRangeSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
-      return jsonError("Invalid live draw range.", 400);
+      return jsonError(WHOLE_NUMBER_RANGE_ERROR, 400);
     }
 
     const { publicCode } = await params;

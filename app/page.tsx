@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { PublicHome } from "@/components/public/PublicHome";
+import { MAX_DRAW_RANGE_SIZE } from "@/lib/draw-range";
 import { getRecentPublicResults, getSiteSettings } from "@/lib/public-data";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +46,7 @@ export default async function HomePage() {
           confettiEnabled: settings.confettiEnabled,
           defaultFrom: settings.defaultFrom,
           defaultTo: settings.defaultTo,
-          maximumAllowedRange: settings.maximumAllowedRange,
+          maximumAllowedRange: MAX_DRAW_RANGE_SIZE,
           publicDisclosureMessage: settings.publicDisclosureMessage
         }}
         initialResults={recent}

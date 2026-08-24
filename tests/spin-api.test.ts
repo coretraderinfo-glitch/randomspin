@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MAX_DRAW_NUMBER_ERROR, RANGE_ORDER_ERROR } from "@/lib/draw-range";
 import { SpinValidationError } from "@/lib/spin";
 
 const mocks = vi.hoisted(() => ({
@@ -48,11 +49,11 @@ describe("spin API", () => {
       (from: number, to: number, rules: { maximumAllowedRange?: number }) => {
         const maximumAllowedRange = rules.maximumAllowedRange ?? 1000;
         if (from >= to) {
-          throw new SpinValidationError("FROM must be lower than TO.");
+          throw new SpinValidationError(RANGE_ORDER_ERROR);
         }
 
-        if (to - from + 1 > maximumAllowedRange) {
-          throw new SpinValidationError(`Please choose a range of ${maximumAllowedRange} numbers or fewer.`);
+        if (to > maximumAllowedRange) {
+          throw new SpinValidationError(MAX_DRAW_NUMBER_ERROR);
         }
 
         return {
@@ -158,6 +159,9 @@ describe("spin API", () => {
   it.each([
     { from: 1, to: 5, winner: 5 },
     { from: 1, to: 30, winner: 24 },
+    { from: 1, to: 101, winner: 101 },
+    { from: 1, to: 500, winner: 500 },
+    { from: 1, to: 1000, winner: 1000 },
     { from: 10, to: 50, winner: 24 }
   ])("selects from the public submitted range $from-$to", async ({ from, to, winner }) => {
     mocks.selectSecureWinner.mockReturnValue({
@@ -199,6 +203,26 @@ describe("spin API", () => {
     const { POST } = await import("@/app/api/spin/route");
     const response = await POST(request(body));
     expect(response.status).toBe(400);
+  });
+
+  it("rejects public 1-1001 clearly without silently clamping", async () => {
+    const { POST } = await import("@/app/api/spin/route");
+    const response = await POST(request({ from: 1, to: 1001 }));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe(MAX_DRAW_NUMBER_ERROR);
+    expect(mocks.selectSecureWinner).toHaveBeenCalledWith(
+      1,
+      1001,
+      expect.objectContaining({
+        configMin: 1,
+        configMax: 1001,
+        maximumAllowedRange: 1000
+      })
+    );
+    expect(mocks.selectSecureWinner).not.toHaveBeenCalledWith(1, 1000, expect.anything());
+    expect(mocks.spinCreate).not.toHaveBeenCalled();
   });
 
   it("ignores stale global public exclusions instead of secretly shrinking the public pool", async () => {

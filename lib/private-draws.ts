@@ -2,13 +2,14 @@ import "server-only";
 import { randomInt } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { MAX_DRAW_RANGE_SIZE, validateDrawRangeValues } from "@/lib/draw-range";
 import { normalizeExcludedNumbers, serializeExcludedNumbers } from "@/lib/excluded-numbers";
 import { normalizePrivateDrawDisplayStyle, type PrivateDrawDisplayStyle } from "@/lib/private-draw-display";
 import { buildEligiblePool, parseExcludedNumbers, selectSecureWinner, SpinValidationError } from "@/lib/spin";
 
 export const PRIVATE_DRAW_RANDOM_MODE = "RANDOM";
 export const PRIVATE_DRAW_OPERATOR_MODE = "OPERATOR";
-export const PRIVATE_DRAW_MAXIMUM_RANGE = 1000;
+export const PRIVATE_DRAW_MAXIMUM_RANGE = MAX_DRAW_RANGE_SIZE;
 
 export type PrivateDrawMode = typeof PRIVATE_DRAW_RANDOM_MODE | typeof PRIVATE_DRAW_OPERATOR_MODE;
 
@@ -182,16 +183,14 @@ export function validateOperatorWinner(draw: NormalizedPrivateDraw, winner: unkn
 }
 
 function validateDrawRange(minNumber: number, maxNumber: number) {
-  if (!Number.isInteger(minNumber) || !Number.isInteger(maxNumber)) {
-    throw new SpinValidationError("Draw range must use whole numbers.");
-  }
+  const validationMessage = validateDrawRangeValues({
+    from: minNumber,
+    to: maxNumber,
+    maximumRangeSize: PRIVATE_DRAW_MAXIMUM_RANGE
+  });
 
-  if (minNumber >= maxNumber) {
-    throw new SpinValidationError("FROM must be lower than TO.");
-  }
-
-  if (maxNumber - minNumber + 1 > PRIVATE_DRAW_MAXIMUM_RANGE) {
-    throw new SpinValidationError("Private draw range can include at most 1,000 numbers.");
+  if (validationMessage) {
+    throw new SpinValidationError(validationMessage);
   }
 }
 
