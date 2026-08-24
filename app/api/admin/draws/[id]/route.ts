@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { logAdminAudit } from "@/lib/admin-audit";
 import { getAdminFromRequest } from "@/lib/auth";
+import { prisma } from "@/lib/db";
 import {
   PRIVATE_DRAW_CARD_REVEAL_DISPLAY,
   PRIVATE_DRAW_NUMBER_ROLLER_DISPLAY,
@@ -47,7 +48,7 @@ const drawUpdateSchema = z.object({
 });
 
 const drawArchiveActionSchema = z.object({
-  action: z.enum(["archive", "restore"])
+  action: z.enum(["archive", "restore", "undo-exclusion"])
 });
 
 const deleteConfirmationSchema = z.object({
@@ -56,6 +57,23 @@ const deleteConfirmationSchema = z.object({
 
 function sameNumbers(left: number[], right: number[]) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function readNumberArray(value: unknown) {
+  return Array.isArray(value) && value.every((item): item is number => Number.isInteger(item)) ? value : null;
+}
+
+function readAuditMetadata(value: unknown) {
+  const metadata = typeof value === "string" ? JSON.parse(value) as unknown : value;
+
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+
+  const before = readNumberArray((metadata as { before?: unknown }).before);
+  const after = readNumberArray((metadata as { after?: unknown }).after);
+
+  return before && after ? { before, after } : null;
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -141,6 +159,20 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       }
     });
 
+    if (!sameNumbers(previous.excludedNumbers, result.draw.excludedNumbers)) {
+      await logAdminAudit({
+        adminUserId: admin.id,
+        action: "PRIVATE_DRAW_EXCLUSIONS_UPDATED",
+        target: `PrivateDraw:${result.draw.id}`,
+        request,
+        metadata: {
+          before: previous.excludedNumbers,
+          after: result.draw.excludedNumbers,
+          rangeLocked: previous.isActive
+        }
+      });
+    }
+
     return NextResponse.json({ draw: result.draw, message });
   } catch (error) {
     if (error instanceof PrivateDrawNotFoundError) {
@@ -177,6 +209,55 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
 
     const { id } = await params;
+    if (parsed.data.action === "undo-exclusion") {
+      const previous = await getPrivateDrawForAdmin(id);
+      if (!previous) {
+        return jsonError("Draw not found.", 404);
+      }
+
+      const latestExclusionChange = await prisma.auditLog.findFirst({
+        where: {
+          action: "PRIVATE_DRAW_EXCLUSIONS_UPDATED",
+          target: `PrivateDraw:${id}`,
+          success: true
+        },
+        orderBy: { createdAt: "desc" }
+      });
+      const metadata = latestExclusionChange ? readAuditMetadata(latestExclusionChange.metadata) : null;
+
+      if (!metadata) {
+        return jsonError("No exclusion change is available to undo.", 400);
+      }
+
+      const result = await updatePrivateDraw({
+        id,
+        input: {
+          name: previous.name,
+          liveSlug: previous.liveSlug,
+          minNumber: previous.minNumber,
+          maxNumber: previous.maxNumber,
+          excludedNumbers: metadata.before,
+          mode: previous.mode,
+          displayStyle: previous.displayStyle,
+          isActive: previous.isActive,
+          allowExcludedOutsideRange: previous.isActive
+        }
+      });
+
+      await logAdminAudit({
+        adminUserId: admin.id,
+        action: "PRIVATE_DRAW_EXCLUSIONS_UNDONE",
+        target: `PrivateDraw:${result.draw.id}`,
+        request,
+        metadata: {
+          before: previous.excludedNumbers,
+          after: result.draw.excludedNumbers
+        }
+      });
+
+      return NextResponse.json({ draw: result.draw, message: "Last exclusion change undone." });
+    }
+
     const draw = parsed.data.action === "archive" ? await archivePrivateDraw(id) : await restorePrivateDraw(id);
 
     await logAdminAudit({

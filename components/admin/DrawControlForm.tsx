@@ -58,6 +58,9 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingAction, setSavingAction] = useState<"save" | "set" | "clear" | "refresh" | null>(null);
+  const [liveStatus, setLiveStatus] = useState(isActive ? (pendingOperatorWinner === null ? "Random ready" : "Next winner armed") : "");
+  const [confirmClearExclusions, setConfirmClearExclusions] = useState(false);
+  const [liveExcludeNumber, setLiveExcludeNumber] = useState("");
   const rangeLocked = draw.isActive;
 
   useEffect(() => {
@@ -68,6 +71,15 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
     const timer = window.setTimeout(() => setMessage(null), 4000);
     return () => window.clearTimeout(timer);
   }, [message]);
+
+  useEffect(() => {
+    if (!confirmClearExclusions) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setConfirmClearExclusions(false), 3500);
+    return () => window.clearTimeout(timer);
+  }, [confirmClearExclusions]);
 
   const excludedNumbers = useMemo(() => parseExcludedText(excludedText), [excludedText]);
   const effectiveExcludedCount = useMemo(
@@ -127,18 +139,31 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
     }
 
     applyServerDraw(data.draw);
+    setLiveStatus(data.draw.pendingOperatorWinner === null ? "Random ready" : "Next winner armed");
     setMessage("Next winner status refreshed.");
   }
 
-  async function save(action?: "set" | "clear") {
+  async function save(
+    action?: "set" | "clear",
+    options: { live?: boolean; excludedTextValue?: string; nextWinnerValue?: string; successMessage?: string } = {}
+  ) {
+    const submittedNextWinner = options.nextWinnerValue ?? nextWinner;
+    const submittedExcludedText = options.excludedTextValue ?? excludedText;
+
     if (action === "set" && mode !== "OPERATOR") {
       setError("Switch to Operator Winner mode before setting the next winner.");
+      if (options.live) {
+        setLiveStatus("Unable to update");
+      }
       setMessage(null);
       return;
     }
 
-    if (action === "set" && !nextWinner.trim()) {
+    if (action === "set" && !submittedNextWinner.trim()) {
       setError("Enter a next winner before setting it.");
+      if (options.live) {
+        setLiveStatus("Unable to update");
+      }
       setMessage(null);
       return;
     }
@@ -147,16 +172,19 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
     setSavingAction(action ?? "save");
     setMessage(null);
     setError(null);
+    if (options.live) {
+      setLiveStatus(action === "set" ? "Setting..." : action === "clear" ? "Clearing..." : "Updating...");
+    }
 
     const payload: Record<string, unknown> = {
       name,
       liveSlug: liveSlug.trim() || null,
-      excludedText,
+      excludedText: submittedExcludedText,
       mode,
       displayStyle,
       isActive,
       action,
-      nextWinner: action === "clear" ? null : mode === "OPERATOR" && nextWinner.trim() ? Number(nextWinner) : undefined
+      nextWinner: action === "clear" ? null : mode === "OPERATOR" && submittedNextWinner.trim() ? Number(submittedNextWinner) : undefined
     };
 
     if (!rangeLocked) {
@@ -176,11 +204,18 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
 
     if (!response.ok) {
       setError(data.error ?? "Draw settings could not be saved.");
+      if (options.live) {
+        setLiveStatus("Unable to update");
+      }
       return;
     }
 
     if (data.draw) {
       applyServerDraw(data.draw);
+    }
+    if (options.live) {
+      setLiveStatus(options.successMessage ?? (data.draw?.pendingOperatorWinner === null ? "Random ready" : "Next winner armed"));
+      return;
     }
     setMessage(
       action === "set" && data.draw?.pendingOperatorWinner != null
@@ -189,6 +224,56 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
           ? "Next winner cleared."
           : normalizeFeedbackMessage(data.message, "Draw settings saved.")
     );
+  }
+
+  async function undoLastExclusion() {
+    setSaving(true);
+    setSavingAction("save");
+    setMessage(null);
+    setError(null);
+    setLiveStatus("Updating...");
+
+    const response = await fetch(`/api/admin/draws/${draw.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "undo-exclusion" })
+    });
+    const data = (await response.json()) as DrawResponse;
+
+    setSaving(false);
+    setSavingAction(null);
+
+    if (!response.ok || !data.draw) {
+      setError(data.error ?? "Unable to update exclusions.");
+      setLiveStatus("Unable to update");
+      return;
+    }
+
+    applyServerDraw(data.draw);
+    setLiveStatus("Last exclusion undone");
+  }
+
+  function saveExclusions(nextExcludedNumbers: number[], successMessage = "Exclusions updated") {
+    const nextText = nextExcludedNumbers.join(",");
+    setExcludedText(nextText);
+    void save(undefined, { live: true, excludedTextValue: nextText, successMessage });
+  }
+
+  function toggleLiveExcluded(value: number) {
+    const next = excludedNumbers.includes(value)
+      ? excludedNumbers.filter((item) => item !== value)
+      : [...excludedNumbers, value].sort((a, b) => a - b);
+    saveExclusions(next);
+  }
+
+  function addLiveExcludedNumber(value: string) {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed)) {
+      setLiveStatus("Unable to update");
+      return;
+    }
+
+    saveExclusions(Array.from(new Set([...excludedNumbers, parsed])).sort((a, b) => a - b));
   }
 
   return (
@@ -232,6 +317,136 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
           </div>
         </div>
       </section>
+
+      {isActive ? (
+        <section className="glass rounded-xl p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.22em] text-[#f6d98f]">Live Control</p>
+              <h3 className="mt-2 text-xl font-black text-white">Fast show controls</h3>
+            </div>
+            <p className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-[#aeb7ca]">
+              {liveStatus}
+            </p>
+          </div>
+
+          <div className="mt-5 grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-[#aeb7ca]">Next Winner</p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
+                <input
+                  aria-label="Live Next Winner"
+                  className="focus-ring h-11 w-full rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white"
+                  disabled={saving || mode !== "OPERATOR"}
+                  inputMode="numeric"
+                  type="number"
+                  value={nextWinner}
+                  onChange={(event) => setNextWinner(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void save("set", { live: true, successMessage: "Next winner armed" });
+                    }
+                  }}
+                />
+                <button
+                  className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-2 text-sm font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
+                  type="button"
+                  disabled={saving || mode !== "OPERATOR"}
+                  onClick={() => void save("set", { live: true, successMessage: "Next winner armed" })}
+                >
+                  {savingAction === "set" ? "Setting..." : "SET NEXT"}
+                </button>
+                <button
+                  className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-2 text-sm font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
+                  type="button"
+                  disabled={saving || mode !== "OPERATOR" || pendingOperatorWinner === null}
+                  onClick={() => void save("clear", { live: true, successMessage: "Next winner cleared" })}
+                >
+                  {savingAction === "clear" ? "Clearing..." : "CLEAR NEXT"}
+                </button>
+              </div>
+              {mode !== "OPERATOR" ? <p className="mt-2 text-sm text-[#aeb7ca]">Switch to Operator Winner mode before arming a next winner.</p> : null}
+            </div>
+
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-[#aeb7ca]">Exclusions</p>
+              {numbers.length > 0 ? (
+                <div className="mt-3 grid grid-cols-5 gap-2 sm:grid-cols-8 md:grid-cols-10">
+                  {numbers.map((number) => {
+                    const excluded = excludedNumbers.includes(number);
+                    return (
+                      <button
+                        key={`live-${number}`}
+                        className={`focus-ring h-10 rounded-lg border text-sm font-black transition ${
+                          excluded
+                            ? "danger-control line-through"
+                            : "border-[rgba(246,217,143,0.22)] bg-[rgba(246,217,143,0.08)] text-white hover:bg-[rgba(246,217,143,0.14)]"
+                        }`}
+                        type="button"
+                        disabled={saving}
+                        aria-pressed={excluded}
+                        onClick={() => toggleLiveExcluded(number)}
+                      >
+                        {number}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <input
+                    aria-label="Exclude Number"
+                    className="focus-ring h-11 w-full rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white"
+                    inputMode="numeric"
+                    type="number"
+                    value={liveExcludeNumber}
+                    onChange={(event) => setLiveExcludeNumber(event.target.value)}
+                  />
+                  <button
+                    className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-2 text-sm font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
+                    type="button"
+                    disabled={saving || !liveExcludeNumber.trim()}
+                    onClick={() => {
+                      addLiveExcludedNumber(liveExcludeNumber);
+                      setLiveExcludeNumber("");
+                    }}
+                  >
+                    EXCLUDE NUMBER
+                  </button>
+                </div>
+              )}
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-2 text-sm font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void undoLastExclusion()}
+                >
+                  UNDO LAST
+                </button>
+                <button
+                  className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-2 text-sm font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
+                  type="button"
+                  disabled={saving || excludedNumbers.length === 0}
+                  onClick={() => {
+                    if (!confirmClearExclusions) {
+                      setConfirmClearExclusions(true);
+                      return;
+                    }
+
+                    setConfirmClearExclusions(false);
+                    saveExclusions([], "Exclusions cleared");
+                  }}
+                >
+                  {confirmClearExclusions ? "CONFIRM CLEAR" : "CLEAR EXCLUSIONS"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       <section className="glass rounded-xl p-5">
         <div className="mb-5">

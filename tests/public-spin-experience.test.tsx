@@ -599,7 +599,7 @@ describe("public spin experience", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/draw/A7K29P/range", expect.objectContaining({ method: "PATCH" }));
     expect(screen.getByRole("spinbutton", { name: "To" })).toHaveValue(30);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByText("Live draw range was not saved, so the spin did not start.")).toBeInTheDocument();
+    expect(screen.getAllByText("Unable to update range").length).toBeGreaterThan(0);
   });
 
   it("debounces rapid authenticated live range edits so the final value is saved", async () => {
@@ -645,7 +645,8 @@ describe("public spin experience", () => {
         body: JSON.stringify({ from: 1, to: 30, revision: "2026-08-21T00:00:00.000Z" })
       })
     );
-    expect(screen.getByText("Live range saved.")).toBeInTheDocument();
+    expect(screen.queryByText("Live range saved.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Saving live range...")).not.toBeInTheDocument();
   });
 
   it("defaults the public homepage to Wheel and lets the user switch to Number and back without calling the API", () => {

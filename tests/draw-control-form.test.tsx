@@ -117,6 +117,99 @@ describe("private draw next round winner admin control", () => {
     expect(body.excludedText).toBe("3,9,14");
   });
 
+  it("provides compact live control for arming and clearing the next winner", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ draw: { ...baseDraw, pendingOperatorWinner: 15 }, message: "" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ draw: { ...baseDraw, pendingOperatorWinner: null }, message: "" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DrawControlForm draw={baseDraw} />);
+
+    expect(screen.getByText("Live Control")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Live Next Winner" }), { target: { value: "15" } });
+    fireEvent.click(screen.getByRole("button", { name: "SET NEXT" }));
+
+    await waitFor(() => expect(screen.getByText("Next winner armed")).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/admin/draws/draw-1",
+      expect.objectContaining({
+        method: "PUT",
+        body: expect.stringContaining('"nextWinner":15')
+      })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "CLEAR NEXT" }));
+
+    await waitFor(() => expect(screen.getByText("Next winner cleared")).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/admin/draws/draw-1",
+      expect.objectContaining({
+        method: "PUT",
+        body: expect.stringContaining('"nextWinner":null')
+      })
+    );
+  });
+
+  it("provides quick exclusion toggle, undo, and two-step clear controls", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ draw: { ...baseDraw, excludedNumbers: [3, 8, 9, 13, 18] }, message: "" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ draw: { ...baseDraw, excludedNumbers: [3, 9, 13, 18] }, message: "Last exclusion change undone." }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ draw: { ...baseDraw, excludedNumbers: [] }, message: "" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DrawControlForm draw={baseDraw} />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "8" })[0]);
+    await waitFor(() => expect(screen.getByText("Exclusions updated")).toBeInTheDocument());
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body ?? "{}")).excludedText).toBe("3,8,9,13,18");
+
+    fireEvent.click(screen.getByRole("button", { name: "UNDO LAST" }));
+    await waitFor(() => expect(screen.getByText("Last exclusion undone")).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/admin/draws/draw-1",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ action: "undo-exclusion" }) })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "CLEAR EXCLUSIONS" }));
+    expect(screen.getByRole("button", { name: "CONFIRM CLEAR" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "CONFIRM CLEAR" }));
+    await waitFor(() => expect(screen.getByText("Exclusions cleared")).toBeInTheDocument());
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body ?? "{}")).excludedText).toBe("");
+  });
+
   it("clears a next winner with a clear success message", async () => {
     vi.stubGlobal(
       "fetch",

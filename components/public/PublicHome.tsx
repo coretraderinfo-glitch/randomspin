@@ -326,7 +326,7 @@ export function PublicHome({
       const validationMessage = validateEditablePrivateRange(requestedRange);
       if (validationMessage) {
         setRangeSaveTone("danger");
-        setRangeSaveMessage(validationMessage);
+        setRangeSaveMessage("Unable to update range");
         return null;
       }
 
@@ -350,8 +350,7 @@ export function PublicHome({
 
         for (;;) {
           saveRangeQueuedRef.current = false;
-          setRangeSaveTone("neutral");
-          setRangeSaveMessage("Saving live range...");
+          setRangeSaveMessage(null);
 
           const response = await fetch(rangeEndpoint, {
             method: "PATCH",
@@ -375,13 +374,12 @@ export function PublicHome({
             }
 
             setRangeSaveTone("danger");
-            setRangeSaveMessage(data && typeof data === "object" && "error" in data && data.error ? data.error : "Live range could not be saved.");
+            setRangeSaveMessage("Unable to update range");
             return null;
           }
 
           const savedState = applyPrivateDrawState(data);
-          setRangeSaveTone("neutral");
-          setRangeSaveMessage("Live range saved.");
+          setRangeSaveMessage(null);
 
           if (!saveRangeQueuedRef.current || sameRange(desiredRangeRef.current, { from: data.from, to: data.to })) {
             return savedState;
@@ -945,7 +943,7 @@ export function PublicHome({
         const requestedRange = commitEditableRangeDrafts();
         if (!requestedRange) {
           setMessageTone("danger");
-          setMessage("Live draw range was not saved, so the spin did not start.");
+          setMessage("Unable to update range");
           return;
         }
 
@@ -953,7 +951,7 @@ export function PublicHome({
         const savedState = rangeNeedsSave ? await savePrivateDrawRange(requestedRange) : await refreshPrivateDrawState();
         if (!savedState) {
           setMessageTone("danger");
-          setMessage(rangeNeedsSave ? "Live draw range was not saved, so the spin did not start." : "Unable to refresh the live draw range. Please try again.");
+          setMessage(rangeNeedsSave ? "Unable to update range" : "Unable to refresh the live draw range. Please try again.");
           return;
         }
 
@@ -1222,12 +1220,10 @@ export function PublicHome({
                 readOnly={drawMode.kind === "private" && !canEditPrivateRange}
               />
             </div>
-            {canEditPrivateRange && rangeSaveMessage ? (
+            {canEditPrivateRange && rangeSaveMessage && rangeSaveTone === "danger" ? (
               <p
-                className={`mt-3 text-sm font-bold ${
-                  rangeSaveTone === "danger" ? "text-[var(--rose)]" : "text-[#7f8aa3]"
-                }`}
-                role={rangeSaveTone === "danger" ? "alert" : "status"}
+                className="mt-3 text-sm font-bold text-[var(--rose)]"
+                role="alert"
               >
                 {rangeSaveMessage}
               </p>

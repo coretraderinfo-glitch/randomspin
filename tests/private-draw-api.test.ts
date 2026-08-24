@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   privateDrawDelete: vi.fn(),
   privateDrawSpinCreate: vi.fn(),
   auditCreate: vi.fn(),
+  auditFindFirst: vi.fn(),
   transaction: vi.fn()
 }));
 
@@ -31,7 +32,7 @@ vi.mock("@/lib/db", () => ({
       delete: mocks.privateDrawDelete
     },
     privateDrawSpinResult: { create: mocks.privateDrawSpinCreate },
-    auditLog: { create: mocks.auditCreate },
+    auditLog: { create: mocks.auditCreate, findFirst: mocks.auditFindFirst },
     $transaction: mocks.transaction
   }
 }));
@@ -72,6 +73,7 @@ describe("private draw operator mode APIs", () => {
     mocks.privateDrawUpdateMany.mockResolvedValue({ count: 1 });
     mocks.privateDrawDelete.mockResolvedValue(baseDraw);
     mocks.auditCreate.mockResolvedValue({});
+    mocks.auditFindFirst.mockResolvedValue(null);
     mocks.privateDrawSpinCreate.mockResolvedValue({
       id: "draw-spin-1",
       winningNumber: 7,
@@ -353,6 +355,178 @@ describe("private draw operator mode APIs", () => {
         data: expect.objectContaining({ minNumber: 1, maxNumber: 18, isActive: true })
       })
     );
+  });
+
+  it("backend live control can undo the last exclusion change without changing active range", async () => {
+    const activeDraw = { ...baseDraw, minNumber: 1, maxNumber: 19, excludedNumbers: [3, 9, 8], mode: "RANDOM", pendingOperatorWinner: null };
+    mocks.privateDrawFindUnique.mockResolvedValue(activeDraw);
+    mocks.privateDrawUpdate.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ ...activeDraw, ...data }));
+    mocks.auditFindFirst.mockResolvedValue({
+      metadata: {
+        before: [3, 9],
+        after: [3, 8, 9]
+      }
+    });
+    const { PATCH } = await import("@/app/api/admin/draws/[id]/route");
+    const response = await PATCH(
+      new NextRequest("http://localhost:3000/api/admin/draws/draw-1", {
+        method: "PATCH",
+        body: JSON.stringify({ action: "undo-exclusion" }),
+        headers: { "content-type": "application/json", origin: "http://localhost:3000" }
+      }),
+      { params: Promise.resolve({ id: "draw-1" }) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.draw).toEqual(expect.objectContaining({ minNumber: 1, maxNumber: 19, excludedNumbers: [3, 9] }));
+    expect(mocks.auditFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ action: "PRIVATE_DRAW_EXCLUSIONS_UPDATED", target: "PrivateDraw:draw-1" })
+      })
+    );
+    expect(mocks.privateDrawUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ minNumber: 1, maxNumber: 19 })
+      })
+    );
+  });
+
+  it("late next winner commit applies only to the following spin", async () => {
+    const { PUT } = await import("@/app/api/admin/draws/[id]/route");
+    const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
+    let resolveSetNext: () => void = () => {
+      throw new Error("Set Next request did not start.");
+    };
+    let currentDraw = {
+      ...baseDraw,
+      minNumber: 1,
+      maxNumber: 20,
+      mode: "OPERATOR",
+      pendingOperatorWinner: null,
+      excludedNumbers: Array.from({ length: 20 }, (_, index) => index + 1).filter((value) => value !== 4)
+    };
+
+    mocks.privateDrawFindUnique.mockImplementation(async () => currentDraw);
+    mocks.privateDrawUpdate.mockImplementation(
+      ({ data }: { data: Record<string, unknown> }) =>
+        new Promise((resolve) => {
+          resolveSetNext = () => {
+            currentDraw = {
+              ...currentDraw,
+              ...data,
+              excludedNumbers: Array.isArray(data.excludedNumbers) ? data.excludedNumbers : JSON.parse(String(data.excludedNumbers ?? "[]"))
+            };
+            resolve(currentDraw);
+          };
+        })
+    );
+    mocks.privateDrawUpdateMany.mockImplementation(async ({ where, data }: { where: { pendingOperatorWinner?: number }; data: { pendingOperatorWinner?: null } }) => {
+      if (where.pendingOperatorWinner === currentDraw.pendingOperatorWinner) {
+        currentDraw = { ...currentDraw, pendingOperatorWinner: data.pendingOperatorWinner ?? null };
+        return { count: 1 };
+      }
+
+      return { count: 0 };
+    });
+    mocks.privateDrawSpinCreate.mockImplementation(async ({ data }: { data: { winningNumber: number; mode: string } }) => ({
+      id: `draw-spin-${data.winningNumber}-${data.mode}`,
+      winningNumber: data.winningNumber,
+      createdAt: new Date("2026-08-21T01:02:03.000Z")
+    }));
+
+    const setNextPromise = PUT(
+      adminRequest(
+        adminPayload({
+          minNumber: 1,
+          maxNumber: 20,
+          excludedNumbers: Array.from({ length: 20 }, (_, index) => index + 1).filter((value) => value !== 4 && value !== 15),
+          mode: "OPERATOR",
+          nextWinner: 15,
+          action: "set"
+        })
+      ),
+      { params: Promise.resolve({ id: "draw-1" }) }
+    );
+    const firstSpin = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const firstBody = await firstSpin.json();
+
+    expect(firstBody).toEqual(expect.objectContaining({ winner: 4, mode: "RANDOM" }));
+
+    resolveSetNext?.();
+    const setNext = await setNextPromise;
+    expect(setNext.status).toBe(200);
+    expect(currentDraw.pendingOperatorWinner).toBe(15);
+
+    const secondSpin = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const secondBody = await secondSpin.json();
+    expect(secondBody).toEqual(expect.objectContaining({ winner: 15, mode: "OPERATOR" }));
+    expect(currentDraw.pendingOperatorWinner).toBeNull();
+
+    const thirdSpin = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const thirdBody = await thirdSpin.json();
+    expect(thirdBody.mode).toBe("RANDOM");
+  });
+
+  it("late exclusion commit applies only to future random spins", async () => {
+    const { PUT } = await import("@/app/api/admin/draws/[id]/route");
+    const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
+    let resolveExclusionSave: () => void = () => {
+      throw new Error("Exclusion save request did not start.");
+    };
+    let currentDraw = {
+      ...baseDraw,
+      minNumber: 1,
+      maxNumber: 20,
+      mode: "RANDOM",
+      pendingOperatorWinner: null,
+      excludedNumbers: Array.from({ length: 20 }, (_, index) => index + 1).filter((value) => value !== 8)
+    };
+
+    mocks.privateDrawFindUnique.mockImplementation(async () => currentDraw);
+    mocks.privateDrawUpdate.mockImplementation(
+      ({ data }: { data: Record<string, unknown> }) =>
+        new Promise((resolve) => {
+          resolveExclusionSave = () => {
+            currentDraw = {
+              ...currentDraw,
+              ...data,
+              excludedNumbers: Array.isArray(data.excludedNumbers) ? data.excludedNumbers : JSON.parse(String(data.excludedNumbers ?? "[]"))
+            };
+            resolve(currentDraw);
+          };
+        })
+    );
+    mocks.privateDrawSpinCreate.mockImplementation(async ({ data }: { data: { winningNumber: number; mode: string } }) => ({
+      id: `draw-spin-${data.winningNumber}-${data.mode}`,
+      winningNumber: data.winningNumber,
+      createdAt: new Date("2026-08-21T01:02:03.000Z")
+    }));
+
+    const saveExclusionPromise = PUT(
+      adminRequest(
+        adminPayload({
+          minNumber: 1,
+          maxNumber: 20,
+          excludedNumbers: Array.from({ length: 20 }, (_, index) => index + 1).filter((value) => value !== 4),
+          mode: "RANDOM",
+          nextWinner: undefined
+        })
+      ),
+      { params: Promise.resolve({ id: "draw-1" }) }
+    );
+    const firstSpin = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const firstBody = await firstSpin.json();
+
+    expect(firstBody).toEqual(expect.objectContaining({ winner: 8, mode: "RANDOM" }));
+
+    resolveExclusionSave?.();
+    const saveExclusion = await saveExclusionPromise;
+    expect(saveExclusion.status).toBe(200);
+
+    const secondSpin = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+    const secondBody = await secondSpin.json();
+    expect(secondBody).toEqual(expect.objectContaining({ winner: 4, mode: "RANDOM" }));
   });
 
   it("live range editing requires an authenticated admin session", async () => {
