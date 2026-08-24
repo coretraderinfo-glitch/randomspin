@@ -14,7 +14,7 @@ export function RecentResults({ results }: { results: RecentResult[] }) {
           Your first result will appear here.
         </p>
       ) : (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex max-h-[7.75rem] flex-wrap gap-2 overflow-y-auto pr-1 sm:max-h-none sm:overflow-visible sm:pr-0">
           {results.map((result, index) => (
             <span
               key={`${result.winner}-${result.timestamp ?? index}`}

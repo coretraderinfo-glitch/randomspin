@@ -16,7 +16,7 @@ export function PublicGameNav({ active }: { active: "spin" | "players" }) {
           key={item.id}
           href={item.href}
           aria-current={active === item.id ? "page" : undefined}
-          className={`focus-ring rounded-md px-3 py-2 text-center transition sm:px-4 ${
+          className={`focus-ring flex min-h-11 items-center justify-center rounded-md px-3 py-2 text-center leading-tight transition sm:px-4 ${
             active === item.id ? "bg-[rgba(37,99,235,0.12)] text-white" : "text-[#aeb7ca] hover:bg-white/8 hover:text-white"
           }`}
         >

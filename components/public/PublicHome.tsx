@@ -1151,8 +1151,8 @@ export function PublicHome({
   return (
     <main className="premium-shell">
       <Confetti active={confetti} />
-      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-6 sm:px-6 lg:px-8">
-        <header className="flex items-center justify-between gap-4">
+      <div className="livestream-page-frame mx-auto flex w-full max-w-7xl flex-col">
+        <header className="flex flex-wrap items-center justify-between gap-3">
           <BrandMark />
           <div className="flex items-center gap-3">
             <PublicGameNav active="spin" />
@@ -1173,7 +1173,7 @@ export function PublicHome({
           </div>
         ) : null}
 
-        <section className="grid min-w-0 flex-1 items-center gap-6 py-8 lg:grid-cols-[0.9fr_1.1fr] lg:gap-8 lg:py-12">
+        <section className="livestream-hero-grid">
           <motion.div
             initial={false}
             animate={{ opacity: 1, y: 0 }}
@@ -1188,15 +1188,15 @@ export function PublicHome({
                 </span>
               ) : null}
             </div>
-            <h1 className="mx-auto max-w-[11ch] break-words font-[var(--font-display)] text-4xl font-black uppercase leading-[0.96] text-white sm:text-6xl lg:mx-0 lg:max-w-none lg:text-7xl">
+            <h1 className="mx-auto max-w-[11ch] break-words font-[var(--font-display)] text-4xl font-black uppercase leading-[0.96] text-white sm:text-5xl lg:mx-0 lg:max-w-none lg:text-7xl">
               {settings.headline}
             </h1>
-            <p className="mt-5 text-lg font-medium text-[#aeb7ca] sm:text-xl">{settings.subtitle}</p>
-            <p className="mt-3 max-w-xl text-sm leading-6 text-[#7f8aa3]">
+            <p className="mt-4 text-base font-medium text-[#aeb7ca] sm:text-xl lg:mt-5">{settings.subtitle}</p>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-[#7f8aa3] max-[480px]:hidden">
               Use RandomSpin to spin numbers, pick random players, and run simple live draws in a clean web-based experience.
             </p>
 
-            <div className="mt-8 grid grid-cols-2 gap-4">
+            <div className="mt-6 grid grid-cols-2 gap-3 sm:gap-4 lg:mt-8">
               <RangeSelector
                 ref={fromRangeSelectorRef}
                 label="From"
@@ -1230,11 +1230,11 @@ export function PublicHome({
             ) : null}
           </motion.div>
 
-          <motion.div initial={false} animate={{ opacity: 1, scale: 1 }} className="relative min-w-0 lg:row-span-2">
+          <motion.div initial={false} animate={{ opacity: 1, scale: 1 }} className="relative min-w-0 md:row-span-2">
             <div className="relative z-20 mb-3 flex justify-center lg:justify-end">
               <div className="view-mode-control inline-grid grid-cols-2 overflow-hidden rounded-full p-1" aria-label="View mode">
                 <button
-                  className={`focus-ring flex min-h-9 items-center justify-center gap-2 rounded-full px-3 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-55 sm:px-4 ${
+                  className={`focus-ring flex min-h-11 items-center justify-center gap-2 rounded-full px-3 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-55 sm:px-4 ${
                     viewMode === PRIVATE_DRAW_WHEEL_DISPLAY ? "view-mode-button-active" : "view-mode-button-idle"
                   }`}
                   type="button"
@@ -1246,7 +1246,7 @@ export function PublicHome({
                   Wheel
                 </button>
                 <button
-                  className={`focus-ring flex min-h-9 items-center justify-center gap-2 rounded-full px-3 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-55 sm:px-4 ${
+                  className={`focus-ring flex min-h-11 items-center justify-center gap-2 rounded-full px-3 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-55 sm:px-4 ${
                     viewMode === PRIVATE_DRAW_NUMBER_ROLLER_DISPLAY ? "view-mode-button-active" : "view-mode-button-idle"
                   }`}
                   type="button"
@@ -1281,9 +1281,9 @@ export function PublicHome({
           </motion.div>
 
           <div className="mx-auto w-full min-w-0 text-center lg:text-left" style={{ maxWidth: "min(36rem, calc(100vw - 2rem))" }}>
-            <div className="mt-5 flex flex-wrap justify-center gap-3 lg:justify-start">
+            <div className="mt-3 flex flex-wrap justify-center gap-3 sm:mt-5 md:justify-start">
               <button
-                className="gold-button focus-ring rounded-lg px-7 py-4 text-sm uppercase tracking-[0.18em] transition hover:scale-[1.02] active:translate-y-px disabled:opacity-60"
+                className="gold-button focus-ring min-h-12 w-full max-w-[18rem] rounded-lg px-7 py-4 text-sm uppercase tracking-[0.18em] transition hover:scale-[1.02] active:translate-y-px disabled:opacity-60 sm:w-auto sm:min-w-[11rem]"
                 onClick={spin}
                 disabled={spinning}
                 aria-label={spinning ? "SPINNING" : spinButtonLabel}
@@ -1327,7 +1327,7 @@ export function PublicHome({
             ) : null}
 
             <p className="mt-4 text-xs leading-5 text-[#7f8aa3]">{settings.publicDisclosureMessage}</p>
-            <div className="mt-8">
+            <div className="mt-5 sm:mt-8">
               <RecentResults results={recent} />
             </div>
           </div>

@@ -319,7 +319,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
       </section>
 
       {isActive ? (
-        <section className="glass rounded-xl p-5">
+        <section className="glass rounded-xl p-4 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.22em] text-[#f6d98f]">Live Control</p>
@@ -330,13 +330,13 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
             </p>
           </div>
 
-          <div className="mt-5 grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
+          <div className="mt-5 grid min-w-0 gap-5 lg:grid-cols-[0.8fr_1.2fr]">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.18em] text-[#aeb7ca]">Next Winner</p>
-              <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
+              <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
                 <input
                   aria-label="Live Next Winner"
-                  className="focus-ring h-11 w-full rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white"
+                  className="focus-ring h-12 w-full rounded-lg border border-white/10 bg-white/[0.06] px-4 text-base text-white"
                   disabled={saving || mode !== "OPERATOR"}
                   inputMode="numeric"
                   type="number"
@@ -350,7 +350,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
                   }}
                 />
                 <button
-                  className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-2 text-sm font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
+                  className="focus-ring min-h-12 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
                   type="button"
                   disabled={saving || mode !== "OPERATOR"}
                   onClick={() => void save("set", { live: true, successMessage: "Next winner armed" })}
@@ -358,7 +358,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
                   {savingAction === "set" ? "Setting..." : "SET NEXT"}
                 </button>
                 <button
-                  className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-2 text-sm font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
+                  className="focus-ring min-h-12 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
                   type="button"
                   disabled={saving || mode !== "OPERATOR" || pendingOperatorWinner === null}
                   onClick={() => void save("clear", { live: true, successMessage: "Next winner cleared" })}
@@ -378,7 +378,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
                     return (
                       <button
                         key={`live-${number}`}
-                        className={`focus-ring h-10 rounded-lg border text-sm font-black transition ${
+                        className={`focus-ring h-11 rounded-lg border text-sm font-black transition ${
                           excluded
                             ? "danger-control line-through"
                             : "border-[rgba(246,217,143,0.22)] bg-[rgba(246,217,143,0.08)] text-white hover:bg-[rgba(246,217,143,0.14)]"
@@ -394,17 +394,17 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
                   })}
                 </div>
               ) : (
-                <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
+                <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                   <input
                     aria-label="Exclude Number"
-                    className="focus-ring h-11 w-full rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white"
+                    className="focus-ring h-12 w-full rounded-lg border border-white/10 bg-white/[0.06] px-4 text-base text-white"
                     inputMode="numeric"
                     type="number"
                     value={liveExcludeNumber}
                     onChange={(event) => setLiveExcludeNumber(event.target.value)}
                   />
                   <button
-                    className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-2 text-sm font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
+                    className="focus-ring min-h-12 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
                     type="button"
                     disabled={saving || !liveExcludeNumber.trim()}
                     onClick={() => {
@@ -417,9 +417,9 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
                 </div>
               )}
 
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-4 grid gap-2 sm:flex sm:flex-wrap">
                 <button
-                  className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-2 text-sm font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
+                  className="focus-ring min-h-12 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
                   type="button"
                   disabled={saving}
                   onClick={() => void undoLastExclusion()}
@@ -427,7 +427,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
                   UNDO LAST
                 </button>
                 <button
-                  className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-2 text-sm font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
+                  className="focus-ring min-h-12 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
                   type="button"
                   disabled={saving || excludedNumbers.length === 0}
                   onClick={() => {
@@ -650,7 +650,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
                 .map((number) => (
                   <button
                     key={number}
-                    className="focus-ring h-10 rounded-lg border border-[rgba(246,217,143,0.22)] bg-[rgba(246,217,143,0.08)] text-sm font-black text-white hover:bg-[rgba(246,217,143,0.14)]"
+                    className="focus-ring h-11 rounded-lg border border-[rgba(246,217,143,0.22)] bg-[rgba(246,217,143,0.08)] text-sm font-black text-white hover:bg-[rgba(246,217,143,0.14)]"
                     type="button"
                     onClick={() => setNextWinner(number.toString())}
                   >

@@ -28,7 +28,7 @@ export function NumberRollerDisplay({ from, to, currentNumber, phase, tempo, spi
   return (
     <div
       className={orbClassName}
-      style={{ maxWidth: "clamp(270px, 62vw, 500px)" }}
+      style={{ maxWidth: "min(clamp(260px, 62vw, 500px), calc(100svh - 5.75rem))" }}
       data-testid="number-roller-display"
     >
       <div className="number-roller-ring" aria-hidden="true" />
@@ -53,12 +53,12 @@ export function NumberRollerDisplay({ from, to, currentNumber, phase, tempo, spi
       <div className="relative z-10 w-full px-8 text-center">
         <p className="text-[0.65rem] font-black uppercase tracking-[0.28em] text-[#2563eb]">Number Roller</p>
         <div
-          className="mx-auto mt-5 grid min-h-[7.5rem] place-items-center overflow-hidden sm:min-h-[9rem]"
+          className="mx-auto mt-4 grid min-h-[6.5rem] place-items-center overflow-hidden sm:mt-5 sm:min-h-[9rem]"
           aria-hidden={phase !== "WINNING"}
         >
           <span
             key={displayValue}
-            className={`number-roller-value gold-text block font-[var(--font-display)] text-[clamp(4.8rem,18vw,10.5rem)] font-black leading-none ${
+            className={`number-roller-value gold-text block font-[var(--font-display)] text-7xl font-black leading-none sm:text-8xl lg:text-9xl ${
               spinning ? "is-changing" : ""
             }`}
             data-testid="number-roller-value"
@@ -66,7 +66,7 @@ export function NumberRollerDisplay({ from, to, currentNumber, phase, tempo, spi
             {displayValue}
           </span>
         </div>
-        <p className="mt-5 text-xs font-black uppercase tracking-[0.26em] text-[#334155]">
+        <p className="mt-4 text-xs font-black uppercase tracking-[0.26em] text-[#334155] sm:mt-5">
           {status}
           {phase === "ROLLING" ? (
             <span className="number-roller-dots" aria-hidden="true">

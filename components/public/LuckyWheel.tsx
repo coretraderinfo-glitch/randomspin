@@ -80,7 +80,7 @@ export function LuckyWheel({
   });
 
   return (
-    <div className="relative mx-auto aspect-square w-full min-w-0" style={{ maxWidth: "clamp(300px, 78vw, 560px)" }}>
+    <div className="relative mx-auto aspect-square w-full min-w-0" style={{ maxWidth: "min(clamp(280px, 76vw, 560px), calc(100svh - 5.75rem))" }}>
       <div
         ref={pointerRef}
         className="pointer-events-none absolute left-1/2 top-[-2px] z-20 -translate-x-1/2"
@@ -169,7 +169,7 @@ export function LuckyWheel({
 
       <button
         type="button"
-        className="gold-button focus-ring absolute left-1/2 top-1/2 z-30 grid size-[108px] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full text-lg transition hover:scale-[1.03] active:scale-95 disabled:opacity-70"
+        className="gold-button focus-ring absolute left-1/2 top-1/2 z-30 grid size-24 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full px-2 text-center text-base leading-tight transition hover:scale-[1.03] active:scale-95 disabled:opacity-70 sm:size-[108px] sm:text-lg"
         onClick={onSpin}
         disabled={spinning}
         aria-label={buttonLabel}
