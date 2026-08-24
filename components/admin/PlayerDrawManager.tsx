@@ -27,12 +27,6 @@ type DrawResponse = {
   deletedId?: string;
 };
 
-const sampleParticipants = ["Ali", "Jason", "Sarah", "David", "Wendy"].map((displayName, index) => ({
-  displayName,
-  reference: String(index + 1).padStart(3, "0"),
-  isEligible: true
-}));
-
 function formatDate(value: string) {
   return new Date(value).toLocaleString();
 }
@@ -78,7 +72,7 @@ export function PlayerDrawManager({ initialDraws }: { initialDraws: PlayerDrawIt
         removeWinnerAfterWin: false,
         showParticipantList: true,
         showReferencesPublicly: true,
-        participants: sampleParticipants
+        participants: []
       })
     });
     const data = (await response.json()) as DrawResponse;
@@ -93,8 +87,8 @@ export function PlayerDrawManager({ initialDraws }: { initialDraws: PlayerDrawIt
     setDraws((current) => [
       {
         ...data.draw!,
-        participantCount: sampleParticipants.length,
-        eligibleCount: sampleParticipants.length,
+        participantCount: data.draw!.participantCount,
+        eligibleCount: data.draw!.eligibleCount,
         resultCount: 0,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()

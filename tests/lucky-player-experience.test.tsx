@@ -2,6 +2,7 @@ import React from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LuckyPlayerHome } from "@/components/public/LuckyPlayerHome";
+import type { PlayerParticipantView } from "@/components/public/LuckyPlayerHome";
 
 describe("RandomSpin Player Draw public experience", () => {
   beforeEach(() => {
@@ -49,6 +50,18 @@ describe("RandomSpin Player Draw public experience", () => {
     );
   }
 
+  const drawParticipants: PlayerParticipantView[] = [
+    { id: "player-1", displayName: "Alice", reference: "001", isEligible: true },
+    { id: "player-2", displayName: "Ben", reference: "002", isEligible: true },
+    { id: "player-3", displayName: "Chloe", reference: "003", isEligible: true },
+    { id: "player-4", displayName: "Dina", reference: "004", isEligible: true },
+    { id: "player-5", displayName: "Evan", reference: "005", isEligible: true }
+  ];
+
+  function renderWithPlayers(participants = drawParticipants) {
+    return render(<LuckyPlayerHome initialParticipants={participants} />);
+  }
+
   it("renders as a separate Player Draw game with navigation and no number wheel", () => {
     render(<LuckyPlayerHome />);
 
@@ -63,15 +76,135 @@ describe("RandomSpin Player Draw public experience", () => {
   it("displays the stronger player ready counter", () => {
     render(<LuckyPlayerHome />);
 
+    expect(screen.getByText("0 PLAYERS READY")).toBeInTheDocument();
+    expect(screen.getByText("0 Eligible")).toBeInTheDocument();
+    expect(screen.getByText("Paste names, import a CSV, or add players manually.")).toBeInTheDocument();
+  });
+
+  it("does not preload demo players on the production public page", () => {
+    render(<LuckyPlayerHome />);
+
+    expect(screen.getByPlaceholderText("Paste one player per line")).toHaveValue("");
+    for (const sampleName of ["Ali", "Jason", "Sarah", "David", "Wendy"]) {
+      expect(screen.queryByText(sampleName)).not.toBeInTheDocument();
+    }
+  });
+
+  it("loads pasted names only after the user confirms using pasted names", () => {
+    render(<LuckyPlayerHome />);
+
+    const pasteBox = screen.getByPlaceholderText("Paste one player per line");
+    fireEvent.change(pasteBox, { target: { value: "Alice\nBob\nCharlie" } });
+
+    expect(screen.getByText("0 PLAYERS READY")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Use Pasted Names" }));
+
+    expect(screen.getByText("3 PLAYERS READY")).toBeInTheDocument();
+    expect(screen.getByText("3 Eligible")).toBeInTheDocument();
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.getByText("Bob")).toBeInTheDocument();
+    expect(screen.getByText("Charlie")).toBeInTheDocument();
+    expect(screen.queryByText("Jason")).not.toBeInTheDocument();
+  });
+
+  it("Clear All requires confirmation and clears players, paste text, drafts, and search", () => {
+    const { unmount } = render(<LuckyPlayerHome />);
+
+    const pasteBox = screen.getByPlaceholderText("Paste one player per line");
+    fireEvent.change(pasteBox, { target: { value: "Alice\nBob\nCharlie" } });
+    fireEvent.click(screen.getByRole("button", { name: "Use Pasted Names" }));
+    fireEvent.change(screen.getByPlaceholderText("Add player name"), { target: { value: "Dana" } });
+    fireEvent.change(screen.getByPlaceholderText("Reference (optional)"), { target: { value: "009" } });
+    fireEvent.change(screen.getByPlaceholderText("Search"), { target: { value: "Alice" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "CLEAR ALL" }));
+
+    expect(screen.getByRole("button", { name: "CONFIRM CLEAR" })).toBeInTheDocument();
+    expect(screen.getByText("3 PLAYERS READY")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "CONFIRM CLEAR" }));
+
+    expect(screen.getByText("0 PLAYERS READY")).toBeInTheDocument();
+    expect(screen.getByText("0 Eligible")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Paste one player per line")).toHaveValue("");
+    expect(screen.getByPlaceholderText("Add player name")).toHaveValue("");
+    expect(screen.getByPlaceholderText("Reference (optional)")).toHaveValue("");
+    expect(screen.getByPlaceholderText("Search")).toHaveValue("");
+    expect(screen.queryByText("Alice")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "CLEAR ALL" })).toBeDisabled();
+
+    unmount();
+    render(<LuckyPlayerHome />);
+    expect(screen.getByText("0 PLAYERS READY")).toBeInTheDocument();
+    expect(screen.queryByText("Alice")).not.toBeInTheDocument();
+  });
+
+  it("Clear All confirmation auto-resets when not confirmed", async () => {
+    renderWithPlayers();
+
+    fireEvent.click(screen.getByRole("button", { name: "CLEAR ALL" }));
+    expect(screen.getByRole("button", { name: "CONFIRM CLEAR" })).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3500);
+    });
+
+    expect(screen.getByRole("button", { name: "CLEAR ALL" })).toBeInTheDocument();
     expect(screen.getByText("5 PLAYERS READY")).toBeInTheDocument();
-    expect(screen.getByText("5 Eligible")).toBeInTheDocument();
+  });
+
+  it("manual add still creates a distinct player with an optional reference", () => {
+    render(<LuckyPlayerHome />);
+
+    fireEvent.change(screen.getByPlaceholderText("Add player name"), { target: { value: "Mina Park" } });
+    fireEvent.change(screen.getByPlaceholderText("Reference (optional)"), { target: { value: "VIP-7" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add participant" }));
+
+    expect(screen.getByText("1 PLAYERS READY")).toBeInTheDocument();
+    expect(screen.getByText("Mina Park")).toBeInTheDocument();
+    expect(screen.getByText("Reference: VIP-7")).toBeInTheDocument();
+  });
+
+  it("CSV import still creates players without sample data", async () => {
+    render(<LuckyPlayerHome />);
+
+    const file = {
+      name: "players.csv",
+      size: 32,
+      text: vi.fn().mockResolvedValue("Name,Reference\nRina,101\nLeo,102")
+    } as unknown as File;
+    fireEvent.change(screen.getByLabelText("Import CSV"), { target: { files: [file] } });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("2 PLAYERS READY")).toBeInTheDocument();
+    expect(screen.getByText("Rina")).toBeInTheDocument();
+    expect(screen.getByText("Reference: 101")).toBeInTheDocument();
+    expect(screen.getByText("Leo")).toBeInTheDocument();
+    expect(screen.queryByText("Wendy")).not.toBeInTheDocument();
+  });
+
+  it("Draw Player safely rejects empty player lists without calling the API", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<LuckyPlayerHome />);
+    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByText("Add at least one eligible participant.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "DRAW PLAYER" })).not.toBeDisabled();
   });
 
   it("shuffle only changes presentation and does not call the winner API", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<LuckyPlayerHome />);
+    renderWithPlayers();
     fireEvent.click(screen.getByRole("button", { name: "SHUFFLE" }));
 
     expect(fetchMock).not.toHaveBeenCalled();
@@ -81,7 +214,7 @@ describe("RandomSpin Player Draw public experience", () => {
     const fetchMock = vi.fn().mockResolvedValue(successfulPlayerResponse("Sarah", "sarah"));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<LuckyPlayerHome />);
+    renderWithPlayers();
     fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
     await finishDraw();
 
@@ -96,7 +229,7 @@ describe("RandomSpin Player Draw public experience", () => {
     const fetchMock = vi.fn().mockResolvedValue(successfulPlayerResponse("Sarah", "sarah"));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<LuckyPlayerHome />);
+    renderWithPlayers();
     fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -115,7 +248,7 @@ describe("RandomSpin Player Draw public experience", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<LuckyPlayerHome />);
+    renderWithPlayers();
     fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
 
     await act(async () => {
@@ -138,7 +271,7 @@ describe("RandomSpin Player Draw public experience", () => {
     const fetchMock = vi.fn().mockResolvedValue(successfulPlayerResponse("Jason", "jason"));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<LuckyPlayerHome />);
+    renderWithPlayers();
     fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
     await finishDraw();
 
@@ -153,7 +286,7 @@ describe("RandomSpin Player Draw public experience", () => {
     const fetchMock = vi.fn().mockResolvedValue(successfulPlayerResponse("Wendy", "wendy"));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<LuckyPlayerHome />);
+    renderWithPlayers();
     fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
 
     await act(async () => {
@@ -175,7 +308,7 @@ describe("RandomSpin Player Draw public experience", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<LuckyPlayerHome />);
+    renderWithPlayers();
     fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
 
     await act(async () => {
@@ -242,7 +375,7 @@ describe("RandomSpin Player Draw public experience", () => {
   });
 
   it("Live Mode hides editor controls and Exit Live Mode restores them", () => {
-    render(<LuckyPlayerHome />);
+    renderWithPlayers();
 
     expect(screen.getByText("Paste Names")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Add player name")).toBeInTheDocument();
@@ -265,7 +398,7 @@ describe("RandomSpin Player Draw public experience", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<LuckyPlayerHome />);
+    renderWithPlayers();
     fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
 
     expect(screen.getByRole("button", { name: "DRAWING" })).toBeDisabled();

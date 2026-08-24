@@ -35,12 +35,12 @@ type PlayerSpinResponse = PlayerWinnerResult & {
   error?: never;
 };
 
-const starterNames = "Ali\nJason\nSarah\nDavid\nWendy";
 const finishingDelays = [100, 140, 190, 260];
 const reducedMotionFinishingDelays = [140, 200, 280];
 const winnerHoldMs = 1200;
 const countdownSteps = [3, 2, 1];
 const countdownStepMs = 500;
+const clearAllConfirmMs = 3500;
 
 function createLocalId() {
   return globalThis.crypto?.randomUUID?.() ?? `player-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -141,7 +141,7 @@ export function LuckyPlayerHome({
   initialParticipants?: PlayerParticipantView[];
 }) {
   const [participants, setParticipants] = useState<PlayerParticipantView[]>(initialParticipants);
-  const [manualText, setManualText] = useState(starterNames);
+  const [manualText, setManualText] = useState("");
   const [newName, setNewName] = useState("");
   const [newReference, setNewReference] = useState("");
   const [query, setQuery] = useState("");
@@ -153,6 +153,7 @@ export function LuckyPlayerHome({
   const [result, setResult] = useState<PlayerWinnerResult | null>(null);
   const [recentWinners, setRecentWinners] = useState<PlayerWinnerResult[]>([]);
   const [message, setMessage] = useState<string | null>(null);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
   const [confetti, setConfetti] = useState(false);
   const [liveMode, setLiveMode] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(() => {
@@ -164,6 +165,7 @@ export function LuckyPlayerHome({
   });
   const timerRef = useRef<number | null>(null);
   const confettiTimerRef = useRef<number | null>(null);
+  const clearAllTimerRef = useRef<number | null>(null);
   const audioRef = useRef<AudioContext | null>(null);
   const cursorRef = useRef(0);
   const drawButtonLabel = hasCompletedDraw ? "DRAW AGAIN" : "DRAW PLAYER";
@@ -171,7 +173,7 @@ export function LuckyPlayerHome({
   const showEditor = mode.kind === "public" && !liveMode;
   const showParticipantPreview = !liveMode;
   const showRecentWinners = mode.kind === "public" || mode.showRecentWinners === true;
-  const visibleParticipants = participants.length > 0 ? participants : parseLines(manualText);
+  const visibleParticipants = participants;
   const eligibleParticipants = visibleParticipants.filter((participant) => participant.isEligible);
   const duplicateCount = countDuplicateNames(visibleParticipants);
   const duplicateOrdinals = useMemo(() => getDuplicateOrdinals(visibleParticipants), [visibleParticipants]);
@@ -201,6 +203,11 @@ export function LuckyPlayerHome({
     if (confettiTimerRef.current !== null) {
       window.clearTimeout(confettiTimerRef.current);
       confettiTimerRef.current = null;
+    }
+
+    if (clearAllTimerRef.current !== null) {
+      window.clearTimeout(clearAllTimerRef.current);
+      clearAllTimerRef.current = null;
     }
   }
 
@@ -350,6 +357,8 @@ export function LuckyPlayerHome({
   function loadManualNames() {
     try {
       setParticipants(parseLines(manualText));
+      setQuery("");
+      setConfirmClearAll(false);
       setMessage("Participant list updated.");
     } catch {
       setMessage("Could not read those names.");
@@ -367,6 +376,8 @@ export function LuckyPlayerHome({
     }
 
     setParticipants(parseCsv(await file.text()));
+    setQuery("");
+    setConfirmClearAll(false);
     setMessage("CSV participants imported.");
   }
 
@@ -382,14 +393,43 @@ export function LuckyPlayerHome({
     ]);
     setNewName("");
     setNewReference("");
+    setConfirmClearAll(false);
   }
 
   function shuffleParticipants() {
     setMessage(null);
     setParticipants((current) => {
-      const source = current.length > 0 ? current : parseLines(manualText);
+      const source = current;
       return [...source].sort(() => Math.random() - 0.5);
     });
+  }
+
+  function clearAllPlayers() {
+    if (!confirmClearAll) {
+      setConfirmClearAll(true);
+      setMessage(null);
+      if (clearAllTimerRef.current !== null) {
+        window.clearTimeout(clearAllTimerRef.current);
+      }
+      clearAllTimerRef.current = window.setTimeout(() => {
+        setConfirmClearAll(false);
+        clearAllTimerRef.current = null;
+      }, clearAllConfirmMs);
+      return;
+    }
+
+    if (clearAllTimerRef.current !== null) {
+      window.clearTimeout(clearAllTimerRef.current);
+      clearAllTimerRef.current = null;
+    }
+
+    setParticipants([]);
+    setManualText("");
+    setNewName("");
+    setNewReference("");
+    setQuery("");
+    setConfirmClearAll(false);
+    setMessage("Player list cleared.");
   }
 
   async function drawPlayer() {
@@ -537,7 +577,7 @@ export function LuckyPlayerHome({
                     className="focus-ring min-h-36 w-full resize-y rounded-lg border border-white/10 bg-white/[0.06] px-4 py-3 text-white"
                     value={manualText}
                     onChange={(event) => setManualText(event.target.value)}
-                    placeholder="One participant per line"
+                    placeholder="Paste one player per line"
                     disabled={spinning}
                   />
                 </label>
@@ -550,8 +590,13 @@ export function LuckyPlayerHome({
                     Import CSV
                     <input className="sr-only" type="file" accept=".csv,text/csv" disabled={spinning} onChange={(event) => void importCsv(event.target.files?.[0] ?? null)} />
                   </label>
-                  <button className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black text-white hover:bg-white/12 disabled:opacity-60" type="button" disabled={spinning} onClick={() => setParticipants([])}>
-                    Clear All
+                  <button
+                    className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black text-white hover:bg-white/12 disabled:opacity-60"
+                    type="button"
+                    disabled={spinning || (participants.length === 0 && !manualText.trim() && !newName.trim() && !newReference.trim() && !query.trim())}
+                    onClick={clearAllPlayers}
+                  >
+                    {confirmClearAll ? "CONFIRM CLEAR" : "CLEAR ALL"}
                   </button>
                 </div>
                 {duplicateCount > 0 ? (
@@ -583,7 +628,7 @@ export function LuckyPlayerHome({
                   className="focus-ring h-12 rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white"
                   value={newReference}
                   onChange={(event) => setNewReference(event.target.value)}
-                  placeholder="Reference"
+                  placeholder="Reference (optional)"
                   disabled={spinning}
                 />
                 <button className="focus-ring grid h-12 place-items-center rounded-lg border border-white/12 bg-white/8 px-4 text-white hover:bg-white/12 disabled:opacity-50" type="button" onClick={addParticipant} disabled={spinning} aria-label="Add participant">
@@ -694,7 +739,7 @@ export function LuckyPlayerHome({
               ) : (
                 <div className="mt-4 grid max-h-72 gap-2 overflow-auto pr-1">
                   {filteredParticipants.length === 0 ? (
-                    <p className="text-sm text-[#aeb7ca]">No players loaded yet.</p>
+                    <p className="text-sm text-[#aeb7ca]">Paste names, import a CSV, or add players manually.</p>
                   ) : (
                     filteredParticipants.map((participant) => {
                       const detail = participantDisplayDetail(participant, duplicateOrdinals);

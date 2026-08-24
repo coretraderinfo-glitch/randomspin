@@ -113,6 +113,30 @@ describe("admin feedback banners", () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("http://localhost:3000/live/friday");
   });
 
+  it("creates new player draws without preloaded sample participants", async () => {
+    const emptyPlayerDraw = { ...playerDraw, id: "player-draw-empty", publicCode: "EMPTY1", participantCount: 0, eligibleCount: 0 };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ draw: emptyPlayerDraw, message: "" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PlayerDrawManager initialDraws={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "+ CREATE PLAYER DRAW" }));
+
+    await waitFor(() => expect(screen.getByText("Player draw created successfully.")).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/player-draws",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining('"participants":[]')
+      })
+    );
+    expect(screen.getByText("Code EMPTY1 · Participants 0 · Eligible 0 · Results 0")).toBeInTheDocument();
+  });
+
   it("deactivates and activates private draws with visible feedback", async () => {
     let resolveUpdate: (response: Response) => void = () => {};
     const fetchMock = vi.fn().mockReturnValue(
