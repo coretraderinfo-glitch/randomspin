@@ -71,24 +71,50 @@ describe("private draw next round winner admin control", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/draws/draw-1");
   });
 
-  it("saves range changes with a clear success message and no empty banner", async () => {
+  it("saves inactive starting range changes with a clear success message and no empty banner", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ draw: { ...baseDraw, maxNumber: 66 }, message: "" }), {
+        new Response(JSON.stringify({ draw: { ...baseDraw, isActive: false, maxNumber: 66 }, message: "" }), {
           status: 200,
           headers: { "Content-Type": "application/json" }
         })
       )
     );
 
-    const { container } = render(<DrawControlForm draw={baseDraw} />);
+    const { container } = render(<DrawControlForm draw={{ ...baseDraw, isActive: false }} />);
 
     fireEvent.change(screen.getByRole("spinbutton", { name: "To" }), { target: { value: "66" } });
     fireEvent.click(screen.getByRole("button", { name: "SAVE CHANGES" }));
 
     await waitFor(() => expect(screen.getByText("Draw settings saved.")).toBeInTheDocument());
     expect(container.querySelector(".success-banner")?.textContent).toBe("Draw settings saved.");
+  });
+
+  it("locks active backend range fields and omits stale range values from normal saves", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ draw: { ...baseDraw, maxNumber: 19 }, message: "Draw settings saved." }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DrawControlForm draw={{ ...baseDraw, maxNumber: 19 }} />);
+
+    expect(screen.getByRole("spinbutton", { name: "From" })).toHaveAttribute("readonly");
+    expect(screen.getByRole("spinbutton", { name: "To" })).toHaveAttribute("readonly");
+    expect(screen.getByText("Live range: 1–19")).toBeInTheDocument();
+    expect(screen.getByText("Range is currently controlled from the live draw page.")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Excluded Numbers"), { target: { value: "3,9,14" } });
+    fireEvent.click(screen.getByRole("button", { name: "SAVE CHANGES" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body ?? "{}"));
+    expect(body).not.toHaveProperty("minNumber");
+    expect(body).not.toHaveProperty("maxNumber");
+    expect(body.excludedText).toBe("3,9,14");
   });
 
   it("clears a next winner with a clear success message", async () => {

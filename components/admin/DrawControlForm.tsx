@@ -58,6 +58,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingAction, setSavingAction] = useState<"save" | "set" | "clear" | "refresh" | null>(null);
+  const rangeLocked = draw.isActive;
 
   useEffect(() => {
     if (!message) {
@@ -69,6 +70,10 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
   }, [message]);
 
   const excludedNumbers = useMemo(() => parseExcludedText(excludedText), [excludedText]);
+  const effectiveExcludedCount = useMemo(
+    () => excludedNumbers.filter((number) => number >= minNumber && number <= maxNumber).length,
+    [excludedNumbers, maxNumber, minNumber]
+  );
   const numbers = useMemo(() => {
     if (maxNumber < minNumber || maxNumber - minNumber > 119) {
       return [];
@@ -143,21 +148,26 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
     setMessage(null);
     setError(null);
 
+    const payload: Record<string, unknown> = {
+      name,
+      liveSlug: liveSlug.trim() || null,
+      excludedText,
+      mode,
+      displayStyle,
+      isActive,
+      action,
+      nextWinner: action === "clear" ? null : mode === "OPERATOR" && nextWinner.trim() ? Number(nextWinner) : undefined
+    };
+
+    if (!rangeLocked) {
+      payload.minNumber = minNumber;
+      payload.maxNumber = maxNumber;
+    }
+
     const response = await fetch(`/api/admin/draws/${draw.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name,
-        liveSlug: liveSlug.trim() || null,
-        minNumber,
-        maxNumber,
-        excludedText,
-        mode,
-        displayStyle,
-        isActive,
-        action,
-        nextWinner: action === "clear" ? null : mode === "OPERATOR" && nextWinner.trim() ? Number(nextWinner) : undefined
-      })
+      body: JSON.stringify(payload)
     });
     const data = (await response.json()) as DrawResponse;
 
@@ -277,22 +287,34 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
           <label>
             <span className="mb-2 block text-xs font-black uppercase tracking-[0.18em] text-[#aeb7ca]">From</span>
             <input
-              className="focus-ring h-12 w-full rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white"
+              className="focus-ring h-12 w-full rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white read-only:text-[#aeb7ca]"
               type="number"
               value={minNumber}
+              readOnly={rangeLocked}
+              aria-readonly={rangeLocked}
               onChange={(event) => setMinNumber(Number(event.target.value))}
             />
           </label>
           <label>
             <span className="mb-2 block text-xs font-black uppercase tracking-[0.18em] text-[#aeb7ca]">To</span>
             <input
-              className="focus-ring h-12 w-full rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white"
+              className="focus-ring h-12 w-full rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white read-only:text-[#aeb7ca]"
               type="number"
               value={maxNumber}
+              readOnly={rangeLocked}
+              aria-readonly={rangeLocked}
               onChange={(event) => setMaxNumber(Number(event.target.value))}
             />
           </label>
         </div>
+        {rangeLocked ? (
+          <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3">
+            <p className="text-sm font-black text-white">Live range: {minNumber}–{maxNumber}</p>
+            <p className="mt-1 text-sm text-[#aeb7ca]">Range is currently controlled from the live draw page.</p>
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-[#aeb7ca]">Starting range. Once the draw is active, range changes are controlled from the live page.</p>
+        )}
 
         <label className="mt-4 block">
           <span className="mb-2 block text-xs font-black uppercase tracking-[0.18em] text-[#aeb7ca]">Excluded Numbers</span>
@@ -303,7 +325,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
           />
         </label>
         <p className="mt-2 text-sm text-[#aeb7ca]">
-          Eligible {Math.max(maxNumber - minNumber + 1 - excludedNumbers.length, 0)} / Excluded {excludedNumbers.length}
+          Eligible {Math.max(maxNumber - minNumber + 1 - effectiveExcludedCount, 0)} / Excluded {excludedNumbers.length}
         </p>
 
         {numbers.length > 0 ? (

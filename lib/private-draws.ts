@@ -51,6 +51,7 @@ export type PrivateDrawMutationInput = {
   isActive: boolean;
   nextWinner?: number | null;
   clearPendingWinner?: boolean;
+  allowExcludedOutsideRange?: boolean;
 };
 
 export class PrivateDrawNotFoundError extends Error {
@@ -202,14 +203,31 @@ function validateLiveDrawRange(minNumber: number, maxNumber: number) {
   }
 }
 
-function getExcludedNumbers(input: PrivateDrawMutationInput) {
+function parseUnboundedExcludedNumbers(input: string) {
+  if (!input.trim()) {
+    return [];
+  }
+
+  const parts = input.split(",").filter(Boolean);
+  const values = parts.map((value) => Number(value.trim())).filter((value) => Number.isFinite(value));
+
+  if (values.length !== parts.length || values.some((value) => !Number.isInteger(value))) {
+    throw new SpinValidationError("Use comma-separated whole numbers only.");
+  }
+
+  return Array.from(new Set(values)).sort((a, b) => a - b);
+}
+
+function getExcludedNumbers(input: PrivateDrawMutationInput, range: { minNumber: number; maxNumber: number }) {
   const excludedNumbers =
     input.excludedText !== undefined
-      ? parseExcludedNumbers(input.excludedText, input.minNumber, input.maxNumber)
+      ? input.allowExcludedOutsideRange
+        ? parseUnboundedExcludedNumbers(input.excludedText)
+        : parseExcludedNumbers(input.excludedText, range.minNumber, range.maxNumber)
       : Array.from(new Set(input.excludedNumbers ?? [])).sort((a, b) => a - b);
 
-  if (excludedNumbers.some((value) => !Number.isInteger(value) || value < input.minNumber || value > input.maxNumber)) {
-    const invalid = excludedNumbers.filter((value) => !Number.isInteger(value) || value < input.minNumber || value > input.maxNumber);
+  if (!input.allowExcludedOutsideRange && excludedNumbers.some((value) => !Number.isInteger(value) || value < range.minNumber || value > range.maxNumber)) {
+    const invalid = excludedNumbers.filter((value) => !Number.isInteger(value) || value < range.minNumber || value > range.maxNumber);
     throw new SpinValidationError(`Excluded numbers outside the new range: ${invalid.join(", ")}`);
   }
 
@@ -411,7 +429,7 @@ export async function createPrivateDraw(input: PrivateDrawMutationInput) {
     throw new SpinValidationError("Use a valid draw mode.");
   }
 
-  const excludedNumbers = getExcludedNumbers(input);
+  const excludedNumbers = getExcludedNumbers(input, { minNumber: input.minNumber, maxNumber: input.maxNumber });
   const liveSlug = normalizeLiveSlug(input.liveSlug);
   await assertLiveSlugAvailable(liveSlug);
   const displayStyle = normalizePrivateDrawDisplayStyle(input.displayStyle);
@@ -482,13 +500,25 @@ export async function updatePrivateDraw({
     throw new PrivateDrawNotFoundError();
   }
 
-  validateDrawRange(input.minNumber, input.maxNumber);
+  const liveRangeLocked = draw.isActive;
+  const nextMinNumber = liveRangeLocked ? draw.minNumber : input.minNumber;
+  const nextMaxNumber = liveRangeLocked ? draw.maxNumber : input.maxNumber;
+
+  validateDrawRange(nextMinNumber, nextMaxNumber);
 
   if (!isPrivateDrawMode(input.mode)) {
     throw new SpinValidationError("Use a valid draw mode.");
   }
 
-  const excludedNumbers = getExcludedNumbers(input);
+  const excludedNumbers = getExcludedNumbers(
+    {
+      ...input,
+      minNumber: nextMinNumber,
+      maxNumber: nextMaxNumber,
+      allowExcludedOutsideRange: liveRangeLocked || input.allowExcludedOutsideRange
+    },
+    { minNumber: nextMinNumber, maxNumber: nextMaxNumber }
+  );
   const liveSlug = normalizeLiveSlug(input.liveSlug);
   await assertLiveSlugAvailable(liveSlug, id);
   const displayStyle = normalizePrivateDrawDisplayStyle(input.displayStyle ?? draw.displayStyle);
@@ -496,8 +526,8 @@ export async function updatePrivateDraw({
     ...draw,
     name: input.name,
     liveSlug,
-    minNumber: input.minNumber,
-    maxNumber: input.maxNumber,
+    minNumber: nextMinNumber,
+    maxNumber: nextMaxNumber,
     excludedNumbers,
     mode: input.mode,
     displayStyle,
@@ -524,8 +554,8 @@ export async function updatePrivateDraw({
     data: {
       name: input.name,
       liveSlug,
-      minNumber: input.minNumber,
-      maxNumber: input.maxNumber,
+      minNumber: nextMinNumber,
+      maxNumber: nextMaxNumber,
       excludedNumbers: serializeExcludedNumbers(excludedNumbers),
       mode: input.mode,
       displayStyle,

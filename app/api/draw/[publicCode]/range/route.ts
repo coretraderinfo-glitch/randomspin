@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { logAdminAudit } from "@/lib/admin-audit";
 import { getAdminFromRequest } from "@/lib/auth";
-import { PrivateDrawNotFoundError, PrivateDrawRangeConflictError, updatePrivateDrawLiveRange } from "@/lib/private-draws";
+import { PrivateDrawNotFoundError, PrivateDrawRangeConflictError, getPrivateDrawAudience, updatePrivateDrawLiveRange } from "@/lib/private-draws";
 import { jsonError, requireSameOrigin } from "@/lib/security";
 import { SpinValidationError } from "@/lib/spin";
 
@@ -31,11 +32,25 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
 
     const { publicCode } = await params;
+    const previous = await getPrivateDrawAudience(publicCode);
     const state = await updatePrivateDrawLiveRange({
       publicCode,
       minNumber: parsed.data.from,
       maxNumber: parsed.data.to,
       revision: parsed.data.revision
+    });
+
+    await logAdminAudit({
+      adminUserId: admin.id,
+      action: "PRIVATE_DRAW_LIVE_RANGE_UPDATED",
+      target: `PrivateDraw:${state.id}`,
+      request,
+      metadata: {
+        fromBefore: previous?.minNumber ?? null,
+        toBefore: previous?.maxNumber ?? null,
+        fromAfter: state.minNumber,
+        toAfter: state.maxNumber
+      }
     });
 
     return NextResponse.json({

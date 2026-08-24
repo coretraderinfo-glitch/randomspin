@@ -289,6 +289,72 @@ describe("private draw operator mode APIs", () => {
     expect(mocks.privateDrawUpdate).not.toHaveBeenCalled();
   });
 
+  it("backend admin save cannot overwrite an active live range from a stale form", async () => {
+    const liveDraw = { ...baseDraw, minNumber: 1, maxNumber: 19, excludedNumbers: [3, 9], mode: "RANDOM", pendingOperatorWinner: null };
+    mocks.privateDrawFindUnique.mockResolvedValue(liveDraw);
+    mocks.privateDrawUpdate.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ ...liveDraw, ...data }));
+    const { PUT } = await import("@/app/api/admin/draws/[id]/route");
+    const response = await PUT(
+      adminRequest({
+        ...adminPayload({
+          minNumber: 1,
+          maxNumber: 20,
+          excludedText: "3,9,14",
+          mode: "RANDOM",
+          nextWinner: undefined
+        })
+      }),
+      { params: Promise.resolve({ id: "draw-1" }) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.draw).toEqual(expect.objectContaining({ minNumber: 1, maxNumber: 19, excludedNumbers: [3, 9, 14] }));
+    expect(mocks.privateDrawUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          minNumber: 1,
+          maxNumber: 19,
+          excludedNumbers: "[3,9,14]"
+        })
+      })
+    );
+    expect(mocks.privateDrawUpdate).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ maxNumber: 20 })
+      })
+    );
+  });
+
+  it("inactive backend admin save can configure the starting range before activation", async () => {
+    const inactiveDraw = { ...baseDraw, isActive: false, minNumber: 1, maxNumber: 20, mode: "RANDOM", pendingOperatorWinner: null, excludedNumbers: [] };
+    mocks.privateDrawFindUnique.mockResolvedValue(inactiveDraw);
+    mocks.privateDrawUpdate.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ ...inactiveDraw, ...data }));
+    const { PUT } = await import("@/app/api/admin/draws/[id]/route");
+    const response = await PUT(
+      adminRequest({
+        ...adminPayload({
+          minNumber: 1,
+          maxNumber: 18,
+          excludedNumbers: [],
+          mode: "RANDOM",
+          isActive: true,
+          nextWinner: undefined
+        })
+      }),
+      { params: Promise.resolve({ id: "draw-1" }) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.draw).toEqual(expect.objectContaining({ minNumber: 1, maxNumber: 18, isActive: true }));
+    expect(mocks.privateDrawUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ minNumber: 1, maxNumber: 18, isActive: true })
+      })
+    );
+  });
+
   it("live range editing requires an authenticated admin session", async () => {
     mocks.getAdminFromRequest.mockResolvedValue(null);
     const { PATCH } = await import("@/app/api/draw/[publicCode]/range/route");

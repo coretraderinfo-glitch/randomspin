@@ -30,8 +30,8 @@ export const dynamic = "force-dynamic";
 const drawUpdateSchema = z.object({
   name: z.string().trim().min(1).max(120),
   liveSlug: z.string().max(80).nullable().optional(),
-  minNumber: z.coerce.number().int().min(-1_000_000).max(1_000_000),
-  maxNumber: z.coerce.number().int().min(-1_000_000).max(1_000_000),
+  minNumber: z.coerce.number().int().min(-1_000_000).max(1_000_000).optional(),
+  maxNumber: z.coerce.number().int().min(-1_000_000).max(1_000_000).optional(),
   excludedNumbers: z.array(z.number().int()).max(1000).optional(),
   excludedText: z.string().max(5000).optional(),
   mode: z.enum([PRIVATE_DRAW_RANDOM_MODE, PRIVATE_DRAW_OPERATOR_MODE]),
@@ -92,20 +92,31 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
     const { id } = await params;
     const previous = await getPrivateDrawForAdmin(id);
+    if (!previous) {
+      return jsonError("Draw not found.", 404);
+    }
+
+    if (!previous.isActive && (parsed.data.minNumber === undefined || parsed.data.maxNumber === undefined)) {
+      return jsonError("Starting range is required for inactive draws.", 400);
+    }
+
+    const effectiveMinNumber = previous.isActive ? previous.minNumber : (parsed.data.minNumber ?? previous.minNumber);
+    const effectiveMaxNumber = previous.isActive ? previous.maxNumber : (parsed.data.maxNumber ?? previous.maxNumber);
     const result = await updatePrivateDraw({
       id,
       input: {
         name: parsed.data.name,
         liveSlug: parsed.data.liveSlug,
-        minNumber: parsed.data.minNumber,
-        maxNumber: parsed.data.maxNumber,
+        minNumber: effectiveMinNumber,
+        maxNumber: effectiveMaxNumber,
         excludedNumbers: parsed.data.excludedNumbers,
         excludedText: parsed.data.excludedText,
         mode: parsed.data.mode as PrivateDrawMode,
         displayStyle: parsed.data.displayStyle,
         isActive: parsed.data.isActive,
         nextWinner: parsed.data.nextWinner,
-        clearPendingWinner: parsed.data.action === "clear"
+        clearPendingWinner: parsed.data.action === "clear",
+        allowExcludedOutsideRange: previous.isActive
       }
     });
     const message = result.pendingWinnerCleared
@@ -119,11 +130,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       request,
       metadata: {
         modeChanged: previous ? previous.mode !== result.draw.mode : null,
-        rangeChanged: previous ? previous.minNumber !== result.draw.minNumber || previous.maxNumber !== result.draw.maxNumber : null,
-        exclusionsChanged: previous ? !sameNumbers(previous.excludedNumbers, result.draw.excludedNumbers) : null,
-        activationChanged: previous ? previous.isActive !== result.draw.isActive : null,
-        displayStyleChanged: previous ? previous.displayStyle !== result.draw.displayStyle : null,
-        liveSlugChanged: previous ? previous.liveSlug !== result.draw.liveSlug : null,
+        rangeChanged: previous.minNumber !== result.draw.minNumber || previous.maxNumber !== result.draw.maxNumber,
+        rangeLocked: previous.isActive,
+        exclusionsChanged: !sameNumbers(previous.excludedNumbers, result.draw.excludedNumbers),
+        activationChanged: previous.isActive !== result.draw.isActive,
+        displayStyleChanged: previous.displayStyle !== result.draw.displayStyle,
+        liveSlugChanged: previous.liveSlug !== result.draw.liveSlug,
         nextWinnerAction: parsed.data.action ?? (parsed.data.nextWinner !== undefined ? "set" : null),
         pendingWinnerCleared: result.pendingWinnerCleared
       }
