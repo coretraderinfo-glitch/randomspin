@@ -144,6 +144,7 @@ export function LuckyPlayerHome({
   const [manualText, setManualText] = useState("");
   const [newName, setNewName] = useState("");
   const [newReference, setNewReference] = useState("");
+  const [showReferenceInput, setShowReferenceInput] = useState(false);
   const [query, setQuery] = useState("");
   const [rollingName, setRollingName] = useState("READY");
   const [phase, setPhase] = useState<"READY" | "COUNTDOWN" | "ROLLING" | "WINNING" | "COMPLETE" | "ERROR">("READY");
@@ -170,9 +171,9 @@ export function LuckyPlayerHome({
   const cursorRef = useRef(0);
   const drawButtonLabel = hasCompletedDraw ? "DRAW AGAIN" : "DRAW PLAYER";
   const privateMode = mode.kind === "private";
-  const showEditor = mode.kind === "public" && !liveMode;
-  const showParticipantPreview = !liveMode;
-  const showRecentWinners = mode.kind === "public" || mode.showRecentWinners === true;
+  const showSetupControls = mode.kind === "public" && !liveMode;
+  const showLiveControls = privateMode || liveMode;
+  const showParticipantPreview = privateMode || !liveMode;
   const visibleParticipants = participants;
   const eligibleParticipants = visibleParticipants.filter((participant) => participant.isEligible);
   const duplicateCount = countDuplicateNames(visibleParticipants);
@@ -182,6 +183,8 @@ export function LuckyPlayerHome({
     .slice(0, 120);
   const participantCount = privateMode ? mode.participantCount : visibleParticipants.length;
   const eligibleCount = privateMode ? mode.eligibleCount : eligibleParticipants.length;
+  const showRecentWinners =
+    (mode.kind === "public" || mode.showRecentWinners === true) && (showLiveControls || recentWinners.length > 0);
 
   useEffect(() => {
     window.localStorage.setItem("lucky-player-sound", soundEnabled ? "on" : "off");
@@ -393,6 +396,7 @@ export function LuckyPlayerHome({
     ]);
     setNewName("");
     setNewReference("");
+    setShowReferenceInput(false);
     setConfirmClearAll(false);
   }
 
@@ -427,6 +431,7 @@ export function LuckyPlayerHome({
     setManualText("");
     setNewName("");
     setNewReference("");
+    setShowReferenceInput(false);
     setQuery("");
     setConfirmClearAll(false);
     setMessage("Player list cleared.");
@@ -569,8 +574,9 @@ export function LuckyPlayerHome({
             </motion.div>
             <p className="mt-3 text-xs leading-5 text-[#7f8aa3]">{statusCopy}</p>
 
-            {showEditor ? (
+            {showSetupControls ? (
               <div className="mt-6 grid gap-4">
+                <p className="text-xs font-black uppercase tracking-[0.22em] text-[#f6d98f]">Player Setup</p>
                 <label>
                   <span className="mb-2 block text-xs font-black uppercase tracking-[0.18em] text-[#aeb7ca]">Paste Names</span>
                   <textarea
@@ -596,7 +602,7 @@ export function LuckyPlayerHome({
                     disabled={spinning || (participants.length === 0 && !manualText.trim() && !newName.trim() && !newReference.trim() && !query.trim())}
                     onClick={clearAllPlayers}
                   >
-                    {confirmClearAll ? "CONFIRM CLEAR" : "CLEAR ALL"}
+                    {confirmClearAll ? "CONFIRM CLEAR" : "CLEAR LIST"}
                   </button>
                 </div>
                 {duplicateCount > 0 ? (
@@ -615,50 +621,81 @@ export function LuckyPlayerHome({
               </div>
             ) : null}
 
-            {showEditor ? (
-              <div className="mt-6 grid gap-3 sm:grid-cols-[1fr_0.6fr_auto]">
-                <input
-                  className="focus-ring h-12 rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white"
-                  value={newName}
-                  onChange={(event) => setNewName(event.target.value)}
-                  placeholder="Add player name"
-                  disabled={spinning}
-                />
-                <input
-                  className="focus-ring h-12 rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white"
-                  value={newReference}
-                  onChange={(event) => setNewReference(event.target.value)}
-                  placeholder="Reference (optional)"
-                  disabled={spinning}
-                />
-                <button className="focus-ring grid h-12 place-items-center rounded-lg border border-white/12 bg-white/8 px-4 text-white hover:bg-white/12 disabled:opacity-50" type="button" onClick={addParticipant} disabled={spinning} aria-label="Add participant">
-                  <Plus className="size-4" />
+            {showSetupControls ? (
+              <div className="mt-6 grid gap-3">
+                <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                  <input
+                    className="focus-ring h-12 rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white"
+                    value={newName}
+                    onChange={(event) => setNewName(event.target.value)}
+                    placeholder="Add player name"
+                    disabled={spinning}
+                  />
+                  <button className="focus-ring grid h-12 min-w-12 place-items-center rounded-lg border border-white/12 bg-white/8 px-4 text-white hover:bg-white/12 disabled:opacity-50" type="button" onClick={addParticipant} disabled={spinning} aria-label="Add participant">
+                    <Plus className="size-4" />
+                  </button>
+                </div>
+                {showReferenceInput ? (
+                  <input
+                    className="focus-ring h-11 rounded-lg border border-white/10 bg-white/[0.06] px-4 text-sm text-white sm:max-w-sm"
+                    value={newReference}
+                    onChange={(event) => setNewReference(event.target.value)}
+                    placeholder="Reference (optional)"
+                    disabled={spinning}
+                  />
+                ) : (
+                  <button
+                    className="focus-ring w-fit rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-[#aeb7ca] hover:bg-white/[0.08] hover:text-white"
+                    type="button"
+                    disabled={spinning}
+                    onClick={() => setShowReferenceInput(true)}
+                  >
+                    Add reference
+                  </button>
+                )}
+              </div>
+            ) : null}
+
+            {showSetupControls ? (
+              <div className="mt-5">
+                <button
+                  className="gold-button focus-ring rounded-lg px-6 py-4 text-sm uppercase tracking-[0.16em] disabled:opacity-60"
+                  type="button"
+                  disabled={spinning || eligibleCount === 0}
+                  onClick={() => setLiveMode(true)}
+                >
+                  START LIVE DRAW
                 </button>
               </div>
             ) : null}
 
-            <div className="mt-5 flex flex-wrap gap-3">
-              <button className="gold-button focus-ring rounded-lg px-7 py-4 text-sm uppercase tracking-[0.18em] disabled:opacity-60" type="button" disabled={spinning} onClick={drawPlayer}>
-                {spinning ? "DRAWING" : drawButtonLabel}
-              </button>
-              <button className="focus-ring flex items-center gap-2 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black text-white hover:bg-white/12 disabled:opacity-60" type="button" disabled={spinning} onClick={shuffleParticipants}>
-                <Shuffle className="size-4 text-[#f6d98f]" />
-                SHUFFLE
-              </button>
-              <button className="focus-ring grid size-12 place-items-center rounded-lg border border-white/12 bg-white/8 text-white hover:bg-white/12" onClick={() => setSoundEnabled((value) => !value)} aria-label={soundEnabled ? "Turn sound off" : "Turn sound on"}>
-                {soundEnabled ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}
-              </button>
-              <button className="focus-ring grid size-12 place-items-center rounded-lg border border-white/12 bg-white/8 text-white hover:bg-white/12" onClick={() => document.documentElement.requestFullscreen?.()} aria-label="Full screen">
-                <Maximize2 className="size-4" />
-              </button>
-              <button
-                className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black text-white hover:bg-white/12"
-                type="button"
-                onClick={() => setLiveMode((value) => !value)}
-              >
-                {liveMode ? "EXIT LIVE MODE" : "LIVE MODE"}
-              </button>
-            </div>
+            {showLiveControls ? (
+              <div className="mt-5 flex flex-wrap items-center gap-3">
+                <button className="gold-button focus-ring rounded-lg px-7 py-4 text-sm uppercase tracking-[0.18em] disabled:opacity-60" type="button" disabled={spinning || eligibleCount === 0} onClick={drawPlayer}>
+                  {spinning ? "DRAWING" : drawButtonLabel}
+                </button>
+                <button className="focus-ring flex items-center gap-2 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black text-white hover:bg-white/12 disabled:opacity-60" type="button" disabled={spinning} onClick={shuffleParticipants}>
+                  <Shuffle className="size-4 text-[#f6d98f]" />
+                  SHUFFLE
+                </button>
+                <button className="focus-ring grid size-12 place-items-center rounded-lg border border-white/12 bg-white/8 text-white hover:bg-white/12" onClick={() => setSoundEnabled((value) => !value)} aria-label={soundEnabled ? "Turn sound off" : "Turn sound on"}>
+                  {soundEnabled ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}
+                </button>
+                <button className="focus-ring grid size-12 place-items-center rounded-lg border border-white/12 bg-white/8 text-white hover:bg-white/12" onClick={() => document.documentElement.requestFullscreen?.()} aria-label="Full screen">
+                  <Maximize2 className="size-4" />
+                </button>
+                {!privateMode ? (
+                  <button
+                    className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black text-white hover:bg-white/12 disabled:opacity-60"
+                    type="button"
+                    disabled={spinning}
+                    onClick={() => setLiveMode(false)}
+                  >
+                    EDIT PLAYERS
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
 
             {message ? <p className="mt-4 rounded-lg border border-white/10 bg-white/[0.05] px-4 py-3 text-sm text-[#dfe6f6]">{message}</p> : null}
 
@@ -753,7 +790,7 @@ export function LuckyPlayerHome({
                             </p>
                             {participant.reference ? <p className="text-xs text-[#8f9bb4]">Reference: {participant.reference}</p> : null}
                           </div>
-                          {showEditor ? (
+                          {showSetupControls ? (
                             <button className="focus-ring grid size-9 place-items-center rounded-lg border border-white/10 text-[#aeb7ca] hover:text-white" type="button" onClick={() => setParticipants((current) => current.filter((item) => item.id !== participant.id))} aria-label={`Remove ${participant.displayName}`}>
                               <Trash2 className="size-4" />
                             </button>
