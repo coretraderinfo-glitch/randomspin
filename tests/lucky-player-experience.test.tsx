@@ -63,12 +63,7 @@ describe("RandomSpin Player Draw public experience", () => {
   }
 
   function startLiveDraw() {
-    fireEvent.click(screen.getByRole("button", { name: "START LIVE DRAW" }));
-  }
-
-  function renderLiveWithPlayers(participants = drawParticipants) {
-    renderWithPlayers(participants);
-    startLiveDraw();
+    fireEvent.click(screen.getByRole("button", { name: "LIVE DRAW" }));
   }
 
   it("renders as a separate Player Draw game with navigation and no number wheel", () => {
@@ -89,7 +84,7 @@ describe("RandomSpin Player Draw public experience", () => {
     expect(screen.getByText("0 PLAYERS READY")).toBeInTheDocument();
     expect(screen.getByText("0 Eligible")).toBeInTheDocument();
     expect(screen.getByText("Paste names, import a CSV, or add players manually.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "START LIVE DRAW" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "LIVE DRAW" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "SHUFFLE" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Add participant" })).toHaveClass("h-12", "min-w-12");
     expect(screen.queryByLabelText("Import CSV")).not.toBeInTheDocument();
@@ -216,14 +211,14 @@ describe("RandomSpin Player Draw public experience", () => {
     expect(screen.queryByText("CSV participants imported.")).not.toBeInTheDocument();
   });
 
-  it("Draw Player is not available until Setup Mode has eligible players and live draw starts", () => {
+  it("Draw Player is not available until Setup Mode has eligible players and LIVE DRAW starts", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     render(<LuckyPlayerHome />);
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "START LIVE DRAW" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "LIVE DRAW" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "DRAW PLAYER" })).not.toBeInTheDocument();
   });
 
@@ -248,25 +243,32 @@ describe("RandomSpin Player Draw public experience", () => {
     expect(screen.getByText("3 Eligible")).toBeInTheDocument();
   });
 
-  it("live Shuffle remains presentation-only and does not call the winner API", () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderLiveWithPlayers();
-    fireEvent.click(screen.getByRole("button", { name: "SHUFFLE" }));
-
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("draw player uses the server result and then says DRAW AGAIN", async () => {
+  it("live Shuffle remains presentation-only and does not call the winner API between draws", async () => {
     const fetchMock = vi.fn().mockResolvedValue(successfulPlayerResponse("Sarah", "sarah"));
     vi.stubGlobal("fetch", fetchMock);
 
-    renderLiveWithPlayers();
-    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+    renderWithPlayers();
+    startLiveDraw();
+    await finishDraw();
+    fireEvent.click(screen.getByRole("button", { name: "Close player result" }));
+    fetchMock.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "SHUFFLE" }));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "DRAW AGAIN" })).toBeInTheDocument();
+  });
+
+  it("LIVE DRAW automatically uses the server result and then says DRAW AGAIN", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(successfulPlayerResponse("Sarah", "sarah"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithPlayers();
+    startLiveDraw();
     await finishDraw();
 
     expect(fetchMock).toHaveBeenCalledWith("/api/player-spin", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(screen.getAllByText("WINNING PLAYER").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Sarah").length).toBeGreaterThan(0);
     expect(screen.getByText("Recent Winners")).toBeInTheDocument();
@@ -277,8 +279,8 @@ describe("RandomSpin Player Draw public experience", () => {
     const fetchMock = vi.fn().mockResolvedValue(successfulPlayerResponse("Sarah", "sarah"));
     vi.stubGlobal("fetch", fetchMock);
 
-    renderLiveWithPlayers();
-    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+    renderWithPlayers();
+    startLiveDraw();
     await finishDraw();
 
     fireEvent.click(screen.getByRole("button", { name: "Close player result" }));
@@ -290,17 +292,32 @@ describe("RandomSpin Player Draw public experience", () => {
     expect(screen.getByText("Alice")).toBeInTheDocument();
   });
 
-  it("DRAW PLAYER begins a visual countdown while the API request starts immediately", async () => {
+  it("LIVE DRAW begins READY to 3, 2, 1 countdown while the API request starts immediately", async () => {
     const fetchMock = vi.fn().mockResolvedValue(successfulPlayerResponse("Sarah", "sarah"));
     vi.stubGlobal("fetch", fetchMock);
 
-    renderLiveWithPlayers();
-    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+    renderWithPlayers();
+    startLiveDraw();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("GET READY")).toBeInTheDocument();
-    expect(screen.getByText("COUNTDOWN")).toBeInTheDocument();
+    expect(screen.getByText("PLAYER DRAW")).toBeInTheDocument();
+    expect(screen.getAllByText("READY").length).toBeGreaterThan(0);
+    expect(screen.queryByText("WINNING PLAYER")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(700);
+    });
     expect(screen.getByText("3")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(650);
+    });
+    expect(screen.getByText("2")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(650);
+    });
+    expect(screen.getByText("1")).toBeInTheDocument();
     expect(screen.queryByText("WINNING PLAYER")).not.toBeInTheDocument();
   });
 
@@ -313,11 +330,11 @@ describe("RandomSpin Player Draw public experience", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    renderLiveWithPlayers();
-    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+    renderWithPlayers();
+    startLiveDraw();
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2200);
+      await vi.advanceTimersByTimeAsync(3500);
     });
 
     expect(screen.getByText("ROLLING...")).toBeInTheDocument();
@@ -336,8 +353,8 @@ describe("RandomSpin Player Draw public experience", () => {
     const fetchMock = vi.fn().mockResolvedValue(successfulPlayerResponse("Jason", "jason"));
     vi.stubGlobal("fetch", fetchMock);
 
-    renderLiveWithPlayers();
-    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+    renderWithPlayers();
+    startLiveDraw();
     await finishDraw();
 
     const delays = timeoutSpy.mock.calls.map((call) => call[1]);
@@ -351,14 +368,14 @@ describe("RandomSpin Player Draw public experience", () => {
     const fetchMock = vi.fn().mockResolvedValue(successfulPlayerResponse("Wendy", "wendy"));
     vi.stubGlobal("fetch", fetchMock);
 
-    renderLiveWithPlayers();
-    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+    renderWithPlayers();
+    startLiveDraw();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(500);
     });
 
-    expect(screen.getByText("COUNTDOWN")).toBeInTheDocument();
+    expect(screen.getAllByText("READY").length).toBeGreaterThan(0);
     expect(screen.queryByText("WINNING PLAYER")).not.toBeInTheDocument();
 
     await finishDraw();
@@ -373,19 +390,100 @@ describe("RandomSpin Player Draw public experience", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    renderLiveWithPlayers();
-    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+    renderWithPlayers();
+    startLiveDraw();
 
     await act(async () => {
       await Promise.resolve();
     });
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(5000);
     });
 
     expect(screen.queryByText("WINNING PLAYER")).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByText("Unable to complete this player draw. Please try again.")).toBeInTheDocument();
+    expect(screen.getByText("Unable to draw player")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "TRY AGAIN" })).toBeInTheDocument();
+  });
+
+  it("TRY AGAIN runs a new authoritative draw after a failed first live draw", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "No draw." }), { status: 500, headers: { "Content-Type": "application/json" } })
+      )
+      .mockResolvedValueOnce(successfulPlayerResponse("Sarah", "sarah"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithPlayers();
+    startLiveDraw();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "TRY AGAIN" }));
+    await finishDraw();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getAllByText("WINNING PLAYER").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Sarah").length).toBeGreaterThan(0);
+  });
+
+  it("DRAW AGAIN triggers a countdown and one new authoritative draw", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(successfulPlayerResponse("Sarah", "sarah"))
+      .mockResolvedValueOnce(successfulPlayerResponse("Wendy", "wendy"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithPlayers();
+    startLiveDraw();
+    await finishDraw();
+    fireEvent.click(screen.getByRole("button", { name: "Close player result" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "DRAW AGAIN" }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getAllByText("READY").length).toBeGreaterThan(0);
+    await finishDraw();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getAllByText("WINNING PLAYER").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Wendy").length).toBeGreaterThan(0);
+  });
+
+  it("rapid taps on LIVE DRAW and DRAW AGAIN do not duplicate spin requests", async () => {
+    let resolveFirst: (response: Response) => void = () => {};
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(
+        new Promise<Response>((resolve) => {
+          resolveFirst = resolve;
+        })
+      )
+      .mockResolvedValueOnce(successfulPlayerResponse("Wendy", "wendy"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithPlayers();
+    const liveButton = screen.getByRole("button", { name: "LIVE DRAW" });
+    fireEvent.click(liveButton);
+    fireEvent.click(liveButton);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    resolveFirst(successfulPlayerResponse("Sarah", "sarah"));
+    await finishDraw();
+    fireEvent.click(screen.getByRole("button", { name: "Close player result" }));
+
+    const drawAgainButton = screen.getByRole("button", { name: "DRAW AGAIN" });
+    fireEvent.click(drawAgainButton);
+    fireEvent.click(drawAgainButton);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("private player audience shows mode badge without exposing pending winner controls", () => {
@@ -460,10 +558,13 @@ describe("RandomSpin Player Draw public experience", () => {
     expect(screen.queryByText("ali")).not.toBeInTheDocument();
   });
 
-  it("Start Live Draw hides setup controls and Edit Players restores them with participants preserved", () => {
+  it("LIVE DRAW hides setup controls and Edit Players restores them with participants preserved", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(successfulPlayerResponse("Sarah", "sarah"));
+    vi.stubGlobal("fetch", fetchMock);
+
     renderWithPlayers();
 
-    expect(screen.getByRole("button", { name: "START LIVE DRAW" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "LIVE DRAW" })).not.toBeDisabled();
     expect(screen.getByText("Paste Names")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Add player name")).toBeInTheDocument();
 
@@ -472,11 +573,13 @@ describe("RandomSpin Player Draw public experience", () => {
     expect(screen.queryByText("Paste Names")).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText("Add player name")).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText("Search")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "DRAW PLAYER" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "DRAWING" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "SHUFFLE" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Turn sound off" })).toHaveClass("size-12");
     expect(screen.getByRole("button", { name: "Full screen" })).toHaveClass("size-12");
 
+    await finishDraw();
+    fireEvent.click(screen.getByRole("button", { name: "Close player result" }));
     fireEvent.click(screen.getByRole("button", { name: "EDIT PLAYERS" }));
 
     expect(screen.getByText("Paste Names")).toBeInTheDocument();
@@ -490,8 +593,8 @@ describe("RandomSpin Player Draw public experience", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    renderLiveWithPlayers();
-    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+    renderWithPlayers();
+    startLiveDraw();
 
     expect(screen.getByRole("button", { name: "DRAWING" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "SHUFFLE" })).toBeDisabled();
@@ -500,10 +603,10 @@ describe("RandomSpin Player Draw public experience", () => {
       await Promise.resolve();
     });
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(5000);
     });
 
-    expect(screen.getByRole("button", { name: "DRAW PLAYER" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "TRY AGAIN" })).not.toBeDisabled();
     expect(screen.getByRole("button", { name: "SHUFFLE" })).not.toBeDisabled();
   });
 

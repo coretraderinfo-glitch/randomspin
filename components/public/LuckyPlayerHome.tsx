@@ -39,7 +39,8 @@ const finishingDelays = [100, 140, 190, 260];
 const reducedMotionFinishingDelays = [140, 200, 280];
 const winnerHoldMs = 1200;
 const countdownSteps = [3, 2, 1];
-const countdownStepMs = 500;
+const countdownReadyMs = 700;
+const countdownStepMs = 650;
 const clearAllConfirmMs = 3500;
 
 function createLocalId() {
@@ -168,8 +169,9 @@ export function LuckyPlayerHome({
   const confettiTimerRef = useRef<number | null>(null);
   const clearAllTimerRef = useRef<number | null>(null);
   const audioRef = useRef<AudioContext | null>(null);
+  const spinInFlightRef = useRef(false);
   const cursorRef = useRef(0);
-  const drawButtonLabel = hasCompletedDraw ? "DRAW AGAIN" : "DRAW PLAYER";
+  const drawButtonLabel = phase === "ERROR" ? "TRY AGAIN" : hasCompletedDraw ? "DRAW AGAIN" : "DRAW PLAYER";
   const privateMode = mode.kind === "private";
   const showSetupControls = mode.kind === "public" && !liveMode;
   const showLiveControls = privateMode || liveMode;
@@ -441,7 +443,7 @@ export function LuckyPlayerHome({
   }
 
   async function drawPlayer() {
-    if (spinning) {
+    if (spinning || spinInFlightRef.current) {
       return;
     }
 
@@ -452,6 +454,7 @@ export function LuckyPlayerHome({
     }
 
     setSpinning(true);
+    spinInFlightRef.current = true;
     setMessage(null);
     setResult(null);
     setConfetti(false);
@@ -466,6 +469,10 @@ export function LuckyPlayerHome({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(privateMode ? { winner: "ignored" } : { participants: drawParticipants, winner: "ignored" })
       });
+
+      setCountdownValue(null);
+      playCountdownTick(3);
+      await waitFor(countdownReadyMs);
 
       for (const step of countdownSteps) {
         setCountdownValue(step);
@@ -502,6 +509,7 @@ export function LuckyPlayerHome({
           },
           onComplete: () => {
             setSpinning(false);
+            spinInFlightRef.current = false;
             setHasCompletedDraw(true);
             setPhase("COMPLETE");
             setResult(nextResult);
@@ -512,11 +520,26 @@ export function LuckyPlayerHome({
     } catch {
       clearTimers();
       setSpinning(false);
+      spinInFlightRef.current = false;
       setPhase("ERROR");
       setCountdownValue(null);
       setRollingName("READY");
-      setMessage("Unable to complete this player draw. Please try again.");
+      setMessage("Unable to draw player");
     }
+  }
+
+  function startLiveDraw() {
+    if (spinning || spinInFlightRef.current) {
+      return;
+    }
+
+    if (eligibleCount === 0) {
+      setMessage("Add at least one eligible participant.");
+      return;
+    }
+
+    setLiveMode(true);
+    void drawPlayer();
   }
 
   async function shareResult() {
@@ -671,9 +694,9 @@ export function LuckyPlayerHome({
                   className="gold-button focus-ring rounded-lg px-6 py-4 text-sm uppercase tracking-[0.16em] disabled:opacity-60"
                   type="button"
                   disabled={spinning || eligibleCount === 0}
-                  onClick={() => setLiveMode(true)}
+                  onClick={startLiveDraw}
                 >
-                  START LIVE DRAW
+                  LIVE DRAW
                 </button>
               </div>
             ) : null}
@@ -732,7 +755,7 @@ export function LuckyPlayerHome({
             <div className="relative grid min-h-[22rem] place-items-center overflow-hidden rounded-xl border border-white/10 bg-[radial-gradient(circle_at_50%_30%,rgba(246,217,143,0.14),rgba(255,255,255,0.04)_42%,rgba(255,255,255,0.02)_72%)] p-6 text-center shadow-[0_28px_80px_rgba(0,0,0,0.28)] sm:min-h-[30rem]">
               <div className={phase === "WINNING" || phase === "COMPLETE" ? "rounded-full border border-[rgba(246,217,143,0.35)] px-6 py-8 shadow-[0_0_80px_rgba(246,217,143,0.18)]" : undefined}>
                 <p className="mb-5 text-xs font-black uppercase tracking-[0.26em] text-[#f6d98f]">
-                  {phase === "WINNING" || phase === "COMPLETE" ? "WINNING PLAYER" : phase === "COUNTDOWN" ? "GET READY" : "Name Roller"}
+                  {phase === "WINNING" || phase === "COMPLETE" ? "WINNING PLAYER" : phase === "COUNTDOWN" ? "PLAYER DRAW" : "Name Roller"}
                 </p>
                 {phase === "COUNTDOWN" ? (
                   <motion.div
@@ -742,7 +765,7 @@ export function LuckyPlayerHome({
                     className="gold-text mx-auto flex min-h-[7rem] items-center justify-center font-[var(--font-display)] text-8xl font-black leading-none sm:min-h-[10rem] sm:text-9xl"
                     aria-hidden="true"
                   >
-                    {countdownValue}
+                    {countdownValue ?? "READY"}
                   </motion.div>
                 ) : (
                   <div
@@ -756,7 +779,9 @@ export function LuckyPlayerHome({
                   {phase === "READY"
                     ? "READY"
                     : phase === "COUNTDOWN"
-                      ? "COUNTDOWN"
+                      ? countdownValue === null
+                        ? "READY"
+                        : "COUNTDOWN"
                       : phase === "ROLLING"
                         ? "ROLLING..."
                         : phase === "ERROR"
