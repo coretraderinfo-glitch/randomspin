@@ -144,7 +144,7 @@ export function LuckyPlayerHome({
   const [manualText, setManualText] = useState("");
   const [newName, setNewName] = useState("");
   const [newReference, setNewReference] = useState("");
-  const [showReferenceInput, setShowReferenceInput] = useState(false);
+  const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [query, setQuery] = useState("");
   const [rollingName, setRollingName] = useState("READY");
   const [phase, setPhase] = useState<"READY" | "COUNTDOWN" | "ROLLING" | "WINNING" | "COMPLETE" | "ERROR">("READY");
@@ -362,7 +362,7 @@ export function LuckyPlayerHome({
       setParticipants(parseLines(manualText));
       setQuery("");
       setConfirmClearAll(false);
-      setMessage("Participant list updated.");
+      setMessage(null);
     } catch {
       setMessage("Could not read those names.");
     }
@@ -381,7 +381,7 @@ export function LuckyPlayerHome({
     setParticipants(parseCsv(await file.text()));
     setQuery("");
     setConfirmClearAll(false);
-    setMessage("CSV participants imported.");
+    setMessage(null);
   }
 
   function addParticipant() {
@@ -396,15 +396,18 @@ export function LuckyPlayerHome({
     ]);
     setNewName("");
     setNewReference("");
-    setShowReferenceInput(false);
     setConfirmClearAll(false);
   }
 
   function shuffleParticipants() {
     setMessage(null);
     setParticipants((current) => {
-      const source = current;
-      return [...source].sort(() => Math.random() - 0.5);
+      const shuffled = [...current];
+      for (let index = shuffled.length - 1; index > 0; index -= 1) {
+        const swapIndex = Math.floor(Math.random() * (index + 1));
+        [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+      }
+      return shuffled;
     });
   }
 
@@ -431,10 +434,10 @@ export function LuckyPlayerHome({
     setManualText("");
     setNewName("");
     setNewReference("");
-    setShowReferenceInput(false);
+    setShowMoreOptions(false);
     setQuery("");
     setConfirmClearAll(false);
-    setMessage("Player list cleared.");
+    setMessage(null);
   }
 
   async function drawPlayer() {
@@ -588,14 +591,13 @@ export function LuckyPlayerHome({
                   />
                 </label>
                 <div className="flex flex-wrap gap-3">
-                  <button className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black text-white hover:bg-white/12 disabled:opacity-60" type="button" onClick={loadManualNames} disabled={spinning}>
-                    Use Pasted Names
+                  <button className="gold-button focus-ring rounded-lg px-5 py-3 text-sm uppercase tracking-[0.14em] disabled:opacity-60" type="button" onClick={loadManualNames} disabled={spinning}>
+                    USE NAMES
                   </button>
-                  <label className={`focus-ring flex items-center gap-2 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black text-white hover:bg-white/12 ${spinning ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
-                    <FileUp className="size-4 text-[#f6d98f]" />
-                    Import CSV
-                    <input className="sr-only" type="file" accept=".csv,text/csv" disabled={spinning} onChange={(event) => void importCsv(event.target.files?.[0] ?? null)} />
-                  </label>
+                  <button className="focus-ring flex items-center gap-2 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black text-white hover:bg-white/12 disabled:opacity-60" type="button" disabled={spinning || participants.length < 2} onClick={shuffleParticipants}>
+                    <Shuffle className="size-4 text-[#f6d98f]" />
+                    SHUFFLE
+                  </button>
                   <button
                     className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black text-white hover:bg-white/12 disabled:opacity-60"
                     type="button"
@@ -609,7 +611,7 @@ export function LuckyPlayerHome({
                   <div className="rounded-lg border border-[rgba(246,217,143,0.22)] bg-[rgba(246,217,143,0.08)] px-4 py-3 text-sm text-[#fff4d2]">
                     <p className="font-black">{duplicateCount} duplicate names detected</p>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <button className="focus-ring rounded-lg bg-white/10 px-3 py-2 font-bold text-white" type="button" onClick={() => setMessage("Duplicates kept.")}>
+                      <button className="focus-ring rounded-lg bg-white/10 px-3 py-2 font-bold text-white" type="button" onClick={() => setMessage(null)}>
                         Keep duplicates
                       </button>
                       <button className="focus-ring rounded-lg bg-white/10 px-3 py-2 font-bold text-white" type="button" onClick={() => setParticipants(removeDuplicateNames(visibleParticipants))}>
@@ -635,22 +637,29 @@ export function LuckyPlayerHome({
                     <Plus className="size-4" />
                   </button>
                 </div>
-                {showReferenceInput ? (
+                {showMoreOptions ? (
+                  <div className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3 sm:grid-cols-[minmax(0,0.8fr)_auto] sm:items-center">
                   <input
-                    className="focus-ring h-11 rounded-lg border border-white/10 bg-white/[0.06] px-4 text-sm text-white sm:max-w-sm"
+                    className="focus-ring h-11 rounded-lg border border-white/10 bg-white/[0.06] px-4 text-sm text-white"
                     value={newReference}
                     onChange={(event) => setNewReference(event.target.value)}
                     placeholder="Reference (optional)"
                     disabled={spinning}
                   />
+                    <label className={`focus-ring flex min-h-11 items-center justify-center gap-2 rounded-lg border border-white/12 bg-white/8 px-4 py-2 text-sm font-black text-white hover:bg-white/12 ${spinning ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
+                      <FileUp className="size-4 text-[#f6d98f]" />
+                      Import CSV
+                      <input className="sr-only" type="file" accept=".csv,text/csv" disabled={spinning} onChange={(event) => void importCsv(event.target.files?.[0] ?? null)} />
+                    </label>
+                  </div>
                 ) : (
                   <button
                     className="focus-ring w-fit rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-[#aeb7ca] hover:bg-white/[0.08] hover:text-white"
                     type="button"
                     disabled={spinning}
-                    onClick={() => setShowReferenceInput(true)}
+                    onClick={() => setShowMoreOptions(true)}
                   >
-                    Add reference
+                    MORE OPTIONS
                   </button>
                 )}
               </div>
