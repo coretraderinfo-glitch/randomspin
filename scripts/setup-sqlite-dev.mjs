@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS "SiteSettings" (
   "defaultFrom" INTEGER NOT NULL DEFAULT 1,
   "defaultTo" INTEGER NOT NULL DEFAULT 30,
   "maximumAllowedRange" INTEGER NOT NULL DEFAULT 1000,
-  "publicDisclosureMessage" TEXT NOT NULL DEFAULT 'Results are selected from the configured eligible pool.',
+  "publicDisclosureMessage" TEXT NOT NULL DEFAULT 'Ready for the next draw.',
   "timezone" TEXT NOT NULL DEFAULT 'Asia/Kuala_Lumpur',
   "contactEmail" TEXT,
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -253,7 +253,7 @@ db.prepare(`
     'RandomSpin',
     'RandomSpin',
     'Free random draws for names, numbers, and more.',
-    'Results are selected from the configured eligible pool.',
+    'Ready for the next draw.',
     CURRENT_TIMESTAMP
   )
 `).run();
@@ -264,11 +264,20 @@ db.prepare(`
     "siteName" = 'RandomSpin',
     "headline" = 'RandomSpin',
     "subtitle" = 'Free random draws for names, numbers, and more.',
-    "publicDisclosureMessage" = 'Results are selected from the configured eligible pool.',
+    "publicDisclosureMessage" = 'Ready for the next draw.',
     "updatedAt" = CURRENT_TIMESTAMP
   WHERE "id" = 'default'
     AND "siteName" = 'Lucky Spin'
     AND "headline" = 'SPIN YOUR LUCK'
+`).run();
+
+db.prepare(`
+  UPDATE "SiteSettings"
+  SET
+    "publicDisclosureMessage" = 'Ready for the next draw.',
+    "updatedAt" = CURRENT_TIMESTAMP
+  WHERE "id" = 'default'
+    AND "publicDisclosureMessage" = 'Results are selected from the configured eligible pool.'
 `).run();
 
 db.prepare(`

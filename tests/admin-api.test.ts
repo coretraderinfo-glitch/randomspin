@@ -43,7 +43,7 @@ describe("admin APIs", () => {
       defaultFrom: 1,
       defaultTo: 30,
       maximumAllowedRange: 1000,
-      publicDisclosureMessage: "Results are selected from the configured eligible pool.",
+      publicDisclosureMessage: "Ready for the next draw.",
       timezone: "Asia/Kuala_Lumpur",
       contactEmail: null
     };
@@ -127,7 +127,7 @@ describe("admin APIs", () => {
         defaultFrom: 1,
         defaultTo: 30,
         maximumAllowedRange: 1000,
-        publicDisclosureMessage: "Results are selected from the configured eligible pool.",
+        publicDisclosureMessage: "Ready for the next draw.",
         timezone: "Asia/Kuala_Lumpur",
         contactEmail: null
       })

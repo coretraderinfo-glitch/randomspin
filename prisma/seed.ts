@@ -25,7 +25,7 @@ async function main() {
       siteName: "RandomSpin",
       headline: "RandomSpin",
       subtitle: "Free random draws for names, numbers, and more.",
-      publicDisclosureMessage: "Results are selected from the configured eligible pool."
+      publicDisclosureMessage: "Ready for the next draw."
     }
   });
 

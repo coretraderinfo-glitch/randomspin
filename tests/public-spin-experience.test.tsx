@@ -17,7 +17,7 @@ const settings = {
   defaultFrom: 1,
   defaultTo: 30,
   maximumAllowedRange: 1000,
-  publicDisclosureMessage: "Results are selected from the configured eligible pool."
+  publicDisclosureMessage: "Ready for the next draw."
 };
 
 describe("public spin experience", () => {
@@ -118,6 +118,13 @@ describe("public spin experience", () => {
     render(<LuckyWheel from={1} to={30} winner={null} rotation={0} spinning={false} onSpin={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: "SPIN" })).toHaveTextContent("SPIN");
+  });
+
+  it("shows the neutral ready helper copy", () => {
+    render(<PublicHome settings={settings} initialResults={[]} />);
+
+    expect(screen.getByText("Ready for the next draw.")).toBeInTheDocument();
+    expect(screen.queryByText("Results are selected from the configured eligible pool.")).not.toBeInTheDocument();
   });
 
   it("shows SPIN AGAIN after a result", () => {

@@ -3,6 +3,9 @@ import { prisma } from "@/lib/db";
 import { isDatabaseConfigured } from "@/lib/env";
 import { normalizeExcludedNumbers, serializeExcludedNumbers } from "@/lib/excluded-numbers";
 
+export const defaultPublicDisclosureMessage = "Ready for the next draw.";
+const legacyPublicDisclosureMessage = "Results are selected from the configured eligible pool.";
+
 const fallbackSettings = {
   id: "default",
   siteName: "RandomSpin",
@@ -16,7 +19,7 @@ const fallbackSettings = {
   defaultFrom: 1,
   defaultTo: 30,
   maximumAllowedRange: 1000,
-  publicDisclosureMessage: "Results are selected from the configured eligible pool.",
+  publicDisclosureMessage: defaultPublicDisclosureMessage,
   timezone: "Asia/Kuala_Lumpur",
   contactEmail: null,
   createdAt: new Date(),
@@ -72,11 +75,19 @@ export async function getSiteSettings() {
     return fallbackSettings;
   }
 
-  return prisma.siteSettings.upsert({
+  const settings = await prisma.siteSettings.upsert({
     where: { id: "default" },
     update: {},
     create: { id: "default" }
   });
+
+  return {
+    ...settings,
+    publicDisclosureMessage:
+      settings.publicDisclosureMessage === legacyPublicDisclosureMessage
+        ? defaultPublicDisclosureMessage
+        : settings.publicDisclosureMessage
+  };
 }
 
 export async function getRecentPublicResults(limit = 10) {

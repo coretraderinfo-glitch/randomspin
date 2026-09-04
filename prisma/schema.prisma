@@ -194,7 +194,7 @@ model SiteSettings {
   defaultFrom             Int      @default(1)
   defaultTo               Int      @default(30)
   maximumAllowedRange     Int      @default(1000)
-  publicDisclosureMessage String   @default("Results are selected from the configured eligible pool.")
+  publicDisclosureMessage String   @default("Ready for the next draw.")
   timezone                String   @default("Asia/Kuala_Lumpur")
   contactEmail            String?
   createdAt               DateTime @default(now())
