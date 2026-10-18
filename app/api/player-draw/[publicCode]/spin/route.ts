@@ -13,7 +13,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     await request.json().catch(() => null);
     const { publicCode } = await params;
     const ip = getClientIp(request);
-    const limited = await rateLimit(`player-draw:${publicCode}:${ip}`, env.SPIN_RATE_LIMIT_PER_MINUTE, 60_000);
+    const limited = await rateLimit(`player-draw:${publicCode}:${ip}`, env.SPIN_RATE_LIMIT_PER_MINUTE, 60_000, {
+      allowOnInfrastructureFailure: true,
+      endpoint: "private player spin"
+    });
 
     if (!limited.allowed) {
       return jsonError("Too many requests. Please try again shortly.", 429);

@@ -227,7 +227,9 @@ RandomSpin uses Upstash Redis REST for shared rate limiting in production:
 - Public spins: `40` requests per minute per IP by default.
 - Admin login: `8` requests per minute per IP by default.
 
-If Upstash is not configured in production, rate-limited endpoints fail closed with HTTP `429` instead of silently using per-instance memory.
+If Upstash is not configured or its REST URL is invalid in production, rate-limited endpoints fail closed with HTTP `429` instead of silently using per-instance memory. The application logs a credential-safe configuration warning and continues to start so the configuration can be corrected.
+
+When a correctly configured Redis service has a temporary DNS, network, timeout, or 5xx failure, the four public draw endpoints (`/api/spin`, private number draws, public player spins, and private player draws) continue through the normal database-backed draw path. This narrowly scoped availability fallback does not apply to admin login, TOTP, password, or session endpoints, which retain their fail-closed behavior.
 
 To verify the live Redis-backed limiter without printing credentials:
 

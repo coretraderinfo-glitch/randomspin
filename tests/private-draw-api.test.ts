@@ -1011,6 +1011,10 @@ describe("private draw operator mode APIs", () => {
       where: { id: "draw-1", pendingOperatorWinner: 7 },
       data: { pendingOperatorWinner: null }
     });
+    expect(mocks.rateLimit).toHaveBeenCalledWith("draw-spin:A7K29P:local-development", expect.any(Number), 60_000, {
+      allowOnInfrastructureFailure: true,
+      endpoint: "private number spin"
+    });
   });
 
   it("audience draw data exposes display style but not private configuration", async () => {

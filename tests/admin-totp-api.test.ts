@@ -208,6 +208,20 @@ describe("admin TOTP 2FA", () => {
     expect(response.status).toBe(429);
   });
 
+  it("does not fail open TOTP login when rate-limit infrastructure fails", async () => {
+    mocks.rateLimit.mockRejectedValue(new TypeError("fetch failed"));
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { POST } = await import("@/app/api/admin/login/totp/route");
+
+    const response = await POST(
+      adminRequest("http://localhost:3000/api/admin/login/totp", { challengeToken: "challenge-token-value", code: "123456" })
+    );
+
+    expect(response.status).toBe(500);
+    expect(mocks.getAdminTwoFactorChallenge).not.toHaveBeenCalled();
+    errorLog.mockRestore();
+  });
+
   it("disable requires password and valid TOTP", async () => {
     const { encryptTotpSecret, generateTotpCode } = await import("@/lib/admin-totp");
     const secret = "JBSWY3DPEHPK3PXP";

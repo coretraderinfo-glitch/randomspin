@@ -273,6 +273,10 @@ describe("RandomSpin Player Draw APIs", () => {
     expect(body.displayName).toBe("Sarah");
     expect(body.participantId).toBe("participant-sarah");
     expect(JSON.stringify(body)).not.toContain("pendingOperatorParticipantId");
+    expect(mocks.rateLimit).toHaveBeenCalledWith("player-draw:PLAYTEST:local-development", expect.any(Number), 60_000, {
+      allowOnInfrastructureFailure: true,
+      endpoint: "private player spin"
+    });
   });
 
   it("operator participant is consumed once and not reused", async () => {
@@ -446,7 +450,10 @@ describe("RandomSpin Player Draw APIs", () => {
     expect(response.status).toBe(200);
     expect(body.displayName).toBe("Ali");
     expect(body.participantId).toBe("ali");
-    expect(mocks.rateLimit).toHaveBeenCalledWith("player-spin:local-development", expect.any(Number), 60_000);
+    expect(mocks.rateLimit).toHaveBeenCalledWith("player-spin:local-development", expect.any(Number), 60_000, {
+      allowOnInfrastructureFailure: true,
+      endpoint: "public player spin"
+    });
   });
 
   it("duplicate names remain separate normalized participants", async () => {

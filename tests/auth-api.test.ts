@@ -69,6 +69,18 @@ describe("admin authentication API", () => {
     expect(mocks.logAdminAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "ADMIN_LOGIN_FAILED", success: false }));
   });
 
+  it("does not fail open admin login when rate-limit infrastructure fails", async () => {
+    mocks.rateLimit.mockRejectedValue(new TypeError("fetch failed"));
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { POST } = await import("@/app/api/admin/login/route");
+
+    const response = await POST(loginRequest({ email: "owner@example.com", password: "correct-password" }));
+
+    expect(response.status).toBe(500);
+    expect(mocks.verifyAdminCredentials).not.toHaveBeenCalled();
+    errorLog.mockRestore();
+  });
+
   it("password-only login does not create a full session for 2FA-enabled admin", async () => {
     mocks.verifyAdminCredentials.mockResolvedValue({ id: "admin-1", email: "owner@example.com", totpEnabled: true });
     const { POST } = await import("@/app/api/admin/login/route");

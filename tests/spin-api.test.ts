@@ -96,6 +96,10 @@ describe("spin API", () => {
     expect(JSON.stringify(body)).not.toContain("excludedNumbers");
     expect(JSON.stringify(body)).not.toContain("eligibleNumbers");
     expect(JSON.stringify(body)).not.toContain("admin");
+    expect(mocks.rateLimit).toHaveBeenCalledWith("spin:local-development", expect.any(Number), 60_000, {
+      allowOnInfrastructureFailure: true,
+      endpoint: "public spin"
+    });
   });
 
   it("does not let Admin Wheel Control clamp the public visitor range", async () => {
@@ -261,5 +265,22 @@ describe("spin API", () => {
     const body = await response.json();
     expect(response.status).toBe(429);
     expect(body.error).toBe("Too many requests. Please try again shortly.");
+  });
+
+  it("persists a spin after the draw rate-limit availability fallback", async () => {
+    mocks.rateLimit.mockResolvedValue({ allowed: true, usedAvailabilityFallback: true });
+    const { POST } = await import("@/app/api/spin/route");
+
+    const response = await POST(request({ from: 1, to: 30 }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.winner).toBe(1);
+    expect(mocks.selectSecureWinner).toHaveBeenCalledWith(1, 30, expect.any(Object));
+    expect(mocks.spinCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.rateLimit).toHaveBeenCalledWith("spin:local-development", expect.any(Number), 60_000, {
+      allowOnInfrastructureFailure: true,
+      endpoint: "public spin"
+    });
   });
 });

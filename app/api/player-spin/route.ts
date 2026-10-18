@@ -23,7 +23,10 @@ const spinSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const ip = getClientIp(request);
-    const limited = await rateLimit(`player-spin:${ip}`, env.SPIN_RATE_LIMIT_PER_MINUTE, 60_000);
+    const limited = await rateLimit(`player-spin:${ip}`, env.SPIN_RATE_LIMIT_PER_MINUTE, 60_000, {
+      allowOnInfrastructureFailure: true,
+      endpoint: "public player spin"
+    });
 
     if (!limited.allowed) {
       return jsonError("Too many requests. Please try again shortly.", 429);

@@ -14,7 +14,9 @@ const envSchema = z.object({
   SQLITE_DATABASE_URL: optionalNonEmptyString,
   NEXTAUTH_SECRET: z.preprocess((value) => (value === "" ? undefined : value), z.string().min(32).optional()),
   NEXT_PUBLIC_SITE_URL: optionalUrl,
-  UPSTASH_REDIS_REST_URL: optionalUrl,
+  // Redis availability must not prevent the application from starting. The
+  // rate-limit module validates this value before it attempts a request.
+  UPSTASH_REDIS_REST_URL: optionalNonEmptyString,
   UPSTASH_REDIS_REST_TOKEN: optionalNonEmptyString,
   ADMIN_TOTP_ENCRYPTION_KEY: optionalNonEmptyString,
   SPIN_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(40),
@@ -71,7 +73,27 @@ export function isDatabaseConfigured() {
 }
 
 export function isRedisRateLimitConfigured() {
-  return Boolean(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN);
+  return getRedisRateLimitConfigurationIssue() === null;
+}
+
+export function getRedisRateLimitConfigurationIssue() {
+  const redisUrl = env.UPSTASH_REDIS_REST_URL;
+  const redisToken = env.UPSTASH_REDIS_REST_TOKEN;
+
+  if (!redisUrl || !redisToken) {
+    return "missing Redis REST URL or token";
+  }
+
+  try {
+    const parsed = new URL(redisUrl);
+    if ((parsed.protocol !== "https:" && parsed.protocol !== "http:") || !parsed.hostname) {
+      return "invalid Redis REST URL";
+    }
+  } catch {
+    return "invalid Redis REST URL";
+  }
+
+  return null;
 }
 
 export function isPublicIndexingDisabled() {
