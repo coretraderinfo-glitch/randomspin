@@ -252,6 +252,12 @@ export function LuckyPlayerHome({
   const audioRef = useRef<AudioContext | null>(null);
   const spinInFlightRef = useRef(false);
   const cursorRef = useRef(0);
+  const normalParticipantOrderRef = useRef(
+    initialParticipants.map((participant) => participant.id),
+  );
+  const previousParticipantMembershipRef = useRef(
+    getParticipantMembershipKey(initialParticipants),
+  );
   const drawButtonLabel =
     phase === "ERROR"
       ? "TRY AGAIN"
@@ -311,6 +317,19 @@ export function LuckyPlayerHome({
       // Session storage is optional presentation state.
     }
   }, [participantMembershipKey, shuffleCount, shuffleSessionKey]);
+
+  useEffect(() => {
+    if (
+      previousParticipantMembershipRef.current === participantMembershipKey
+    ) {
+      return;
+    }
+
+    previousParticipantMembershipRef.current = participantMembershipKey;
+    normalParticipantOrderRef.current = participants.map(
+      (participant) => participant.id,
+    );
+  }, [participantMembershipKey, participants]);
 
   useEffect(() => {
     return () => {
@@ -599,6 +618,38 @@ export function LuckyPlayerHome({
     setShuffleCount(0);
   }
 
+  function resetPlayerShuffleForNextDraw(removedParticipantId?: string) {
+    setShuffleCount(0);
+    setParticipants((current) => {
+      const currentParticipants = removedParticipantId
+        ? current.filter((participant) => participant.id !== removedParticipantId)
+        : current;
+      const participantById = new Map(
+        currentParticipants.map((participant) => [participant.id, participant]),
+      );
+      const restoredOrder = normalParticipantOrderRef.current.map((id) =>
+        participantById.get(id),
+      );
+
+      if (
+        restoredOrder.length !== currentParticipants.length ||
+        restoredOrder.some((participant) => !participant)
+      ) {
+        normalParticipantOrderRef.current = currentParticipants.map(
+          (participant) => participant.id,
+        );
+        return currentParticipants;
+      }
+
+      const nextParticipants = restoredOrder as PlayerParticipantView[];
+      return nextParticipants.every(
+        (participant, index) => participant === currentParticipants[index],
+      )
+        ? currentParticipants
+        : nextParticipants;
+    });
+  }
+
   function clearAllPlayers() {
     if (!confirmClearAll) {
       setConfirmClearAll(true);
@@ -718,6 +769,11 @@ export function LuckyPlayerHome({
             setPhase("COMPLETE");
             setResult(nextResult);
             setRecentWinners((current) => [nextResult, ...current].slice(0, 8));
+            resetPlayerShuffleForNextDraw(
+              privateMode && mode.removeWinnerAfterWin
+                ? (data.participantId ?? undefined)
+                : undefined,
+            );
           },
         });
       }, wait);

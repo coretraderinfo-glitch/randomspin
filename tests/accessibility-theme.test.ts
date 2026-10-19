@@ -54,7 +54,9 @@ describe("accessibility theme regressions", () => {
     expect(css).toContain(".number-roller-orb");
     expect(css).toContain("radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.98)");
     expect(css).toContain("conic-gradient(from 0deg, #06b6d4, #2563eb, #7c3aed, #14b8a6");
-    expect(roller).toContain('const displayValue = phase === "READY" ? "?" : currentNumber.toString();');
+    expect(roller).toContain(
+      'const displayValue = shuffling || phase !== "READY" ? currentNumber.toString() : "?";',
+    );
     expect(publicHome).toContain("const NUMBER_ROLLER_FAST_INTERVAL_MS = 52;");
     expect(publicHome).toContain("const NUMBER_ROLLER_MIN_ACTIVE_MS = 1120;");
     expect(publicHome).toContain("const NUMBER_ROLLER_FINAL_DELAYS_MS = [100, 140, 190, 260];");

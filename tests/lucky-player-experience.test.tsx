@@ -350,6 +350,89 @@ describe("RandomSpin Player Draw public experience", () => {
     ).toBeInTheDocument();
   });
 
+  it("resets the completed player draw shuffle state for the next draw and session", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(successfulPlayerResponse("Sarah", "sarah"));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(Math, "random")
+      .mockReturnValueOnce(0.9)
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0.9)
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0.9)
+      .mockReturnValueOnce(0);
+    const players = drawParticipants.slice(0, 3);
+    const first = renderWithPlayers(players);
+
+    for (let count = 0; count < 3; count += 1) {
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: `Shuffle participants, count ${count}`,
+        }),
+      );
+    }
+    expect(
+      screen.getAllByRole("button", { name: /Remove (Alice|Ben|Chloe)/ })
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["Remove Ben", "Remove Alice", "Remove Chloe"]);
+
+    startLiveDraw();
+    expect(
+      screen.getByRole("button", { name: "Shuffle participants, count 3" }),
+    ).toBeDisabled();
+
+    await finishDraw();
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Shuffle participants, count 0" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close player result" }));
+    fireEvent.click(screen.getByRole("button", { name: "EDIT PLAYERS" }));
+    expect(
+      screen.getAllByRole("button", { name: /Remove (Alice|Ben|Chloe)/ })
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["Remove Alice", "Remove Ben", "Remove Chloe"]);
+
+    first.unmount();
+    renderWithPlayers(players);
+    expect(
+      screen.getByRole("button", { name: "Shuffle participants, count 0" }),
+    ).toBeInTheDocument();
+  });
+
+  it("preserves player shuffle state when the draw fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "No draw." }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    renderWithPlayers(drawParticipants.slice(0, 3));
+
+    for (let count = 0; count < 3; count += 1) {
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: `Shuffle participants, count ${count}`,
+        }),
+      );
+    }
+
+    startLiveDraw();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Shuffle participants, count 3" }),
+    ).toBeInTheDocument();
+  });
+
   it("live Shuffle remains presentation-only and does not call the winner API between draws", async () => {
     const fetchMock = vi
       .fn()

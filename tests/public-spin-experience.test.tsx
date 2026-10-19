@@ -315,6 +315,164 @@ describe("public spin experience", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps the landed shuffled wheel order through close, then normalizes it for the next spin", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const rangeSettings = { ...settings, defaultTo: 99 };
+    const winners = [37, 38];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() => {
+        const winner = winners.shift();
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              spinId: `spin-${winner}`,
+              winner,
+              timestamp: "2026-08-19T09:45:37.000Z",
+              from: 1,
+              to: 99,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }),
+    );
+    const first = render(<PublicHome settings={rangeSettings} initialResults={[]} />);
+
+    for (let count = 0; count < 6; count += 1) {
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: `Shuffle numbers, count ${count}`,
+        }),
+      );
+    }
+    const shuffledOrder = visibleWheelOrder();
+    expect(shuffledOrder).not.toEqual(
+      Array.from({ length: 99 }, (_, index) => String(index + 1)),
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    expect(
+      screen.getByRole("button", { name: "Shuffle numbers, count 6" }),
+    ).toBeDisabled();
+    expect(visibleWheelOrder()).toEqual(shuffledOrder);
+
+    await completeSuccessfulSpin();
+
+    expectWinnerNumber(37);
+    expect(screen.getByTestId("winning-segment")).toHaveAttribute(
+      "data-winning-number",
+      "37",
+    );
+    expect(
+      screen.getByRole("button", { name: "Shuffle numbers, count 0" }),
+    ).toBeInTheDocument();
+    expect(visibleWheelOrder()).toEqual(shuffledOrder);
+    const landedRotation = screen.getByLabelText(
+      "RandomSpin number wheel",
+    ).style.transform;
+    expect(
+      JSON.parse(
+        window.sessionStorage.getItem("randomspin:number-shuffle:public") ?? "{}",
+      ),
+    ).toMatchObject({ count: 0, order: shuffledOrder.map(Number) });
+
+    fireEvent.click(screen.getByRole("button", { name: "Close result" }));
+    expect(visibleWheelOrder()).toEqual(shuffledOrder);
+    expect(
+      screen.getByLabelText("RandomSpin number wheel").getAttribute("style"),
+    ).toContain(landedRotation);
+    expect(screen.getByTestId("winning-segment")).toHaveAttribute(
+      "data-winning-number",
+      "37",
+    );
+
+    first.unmount();
+    render(<PublicHome settings={rangeSettings} initialResults={[]} />);
+    expect(
+      screen.getByRole("button", { name: "Shuffle numbers, count 0" }),
+    ).toBeInTheDocument();
+    expect(visibleWheelOrder()).toEqual(shuffledOrder);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    expect(visibleWheelOrder()).toEqual(
+      Array.from({ length: 99 }, (_, index) => String(index + 1)),
+    );
+    await completeSuccessfulSpin();
+    expectWinnerNumber(38);
+    expect(screen.getByTestId("winning-segment")).toHaveAttribute(
+      "data-winning-number",
+      "38",
+    );
+  });
+
+  it("normalizes a completed wheel order before applying a new shuffle", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.stubGlobal("fetch", mockSpinResponses(5));
+    render(<PublicHome settings={settings} initialResults={[]} />);
+
+    for (let count = 0; count < 2; count += 1) {
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: `Shuffle numbers, count ${count}`,
+        }),
+      );
+    }
+    const completedOrder = visibleWheelOrder();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    await completeSuccessfulSpin();
+
+    expect(
+      screen.getByRole("button", { name: "Shuffle numbers, count 0" }),
+    ).toBeInTheDocument();
+    expect(visibleWheelOrder()).toEqual(completedOrder);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Shuffle numbers, count 0" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Shuffle numbers, count 1" }),
+    ).toBeInTheDocument();
+    expect(visibleWheelOrder()).toEqual([
+      ...Array.from({ length: 29 }, (_, index) => String(index + 2)),
+      "1",
+    ]);
+  });
+
+  it("preserves a number draw shuffle state when the spin fails", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "Spin failed." }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    render(<PublicHome settings={settings} initialResults={[]} />);
+
+    for (let count = 0; count < 5; count += 1) {
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: `Shuffle numbers, count ${count}`,
+        }),
+      );
+    }
+    const shuffledOrder = visibleWheelOrder();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "SPIN" })[0]);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8000);
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Shuffle numbers, count 5" }),
+    ).toBeInTheDocument();
+    expect(visibleWheelOrder()).toEqual(shuffledOrder);
+  });
+
   it("shows server result details, keeps SPIN AGAIN after close, and leaves the selected range unchanged", async () => {
     vi.stubGlobal(
       "fetch",
@@ -433,6 +591,90 @@ describe("public spin experience", () => {
     );
     expect(screen.getByTestId("number-roller-value")).toHaveTextContent("24");
     expectWinnerNumber(24);
+  });
+
+  it("queues presentation-only Number Roller shuffles without calling the spin API", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    render(<PublicHome settings={settings} initialResults={[]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Number" }));
+
+    for (let count = 0; count < 5; count += 1) {
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: `Shuffle numbers, count ${count}`,
+        }),
+      );
+    }
+
+    expect(
+      screen.getByRole("button", { name: "Shuffle numbers, count 5" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("number-roller-display")).toHaveAttribute(
+      "data-roller-shuffling",
+      "true",
+    );
+    expect(currentRollerValue()).toBe("1");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByText("Range 1-30")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60);
+    });
+
+    expect(currentRollerValue()).toBe("2");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2200);
+    });
+
+    expect(screen.getByTestId("number-roller-display")).toHaveAttribute(
+      "data-roller-shuffling",
+      "false",
+    );
+    expect(
+      screen.getByRole("button", { name: "Shuffle numbers, count 5" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps a Number Roller shuffle count through the authoritative draw before resetting it", async () => {
+    vi.stubGlobal("fetch", mockSpinResponses(5));
+    render(<PublicHome settings={settings} initialResults={[]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Number" }));
+    for (let count = 0; count < 5; count += 1) {
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: `Shuffle numbers, count ${count}`,
+        }),
+      );
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2200);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "SPIN" }));
+    expect(
+      screen.getByRole("button", { name: "Shuffle numbers, count 5" }),
+    ).toBeDisabled();
+
+    await completeSuccessfulSpin();
+
+    expectWinnerNumber(5);
+    expect(
+      screen.getByRole("button", { name: "Shuffle numbers, count 0" }),
+    ).toBeInTheDocument();
+    expect(
+      JSON.parse(
+        window.sessionStorage.getItem("randomspin:number-shuffle:public") ?? "{}",
+      ),
+    ).toMatchObject({
+      count: 0,
+      order: Array.from({ length: 30 }, (_, index) => index + 1),
+    });
   });
 
   it("renders winner metadata from the supplied server result", () => {
@@ -853,16 +1095,16 @@ describe("public spin experience", () => {
       "data-winning-number",
       "5",
     );
+    expect(visibleWheelOrder()).toEqual(initialOrder);
 
     const shuffleAfterSpin = screen.getByRole("button", {
-      name: "Shuffle numbers, count 1",
+      name: "Shuffle numbers, count 0",
     });
     expect(shuffleAfterSpin).not.toBeDisabled();
     fireEvent.click(shuffleAfterSpin);
     expect(
-      screen.getByRole("button", { name: "Shuffle numbers, count 2" }),
+      screen.getByRole("button", { name: "Shuffle numbers, count 1" }),
     ).toBeInTheDocument();
-    expect(visibleWheelOrder()).not.toEqual(initialOrder);
     expect(screen.getByRole("button", { name: "Reset" })).not.toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Reset" }));
     expect(screen.queryByTestId("winning-segment")).not.toBeInTheDocument();
@@ -1027,12 +1269,15 @@ describe("public spin experience", () => {
       "5",
     );
     expect(screen.getByRole("button", { name: "Reset" })).not.toBeDisabled();
-    expect(shuffleDuringReveal).not.toBeDisabled();
+    const shuffleAfterReveal = screen.getByRole("button", {
+      name: "Shuffle numbers, count 0",
+    });
+    expect(shuffleAfterReveal).not.toBeDisabled();
     expect(screen.getByRole("button", { name: "Wheel" })).not.toBeDisabled();
     expect(screen.getByRole("button", { name: "Number" })).not.toBeDisabled();
-    fireEvent.click(shuffleDuringReveal);
+    fireEvent.click(shuffleAfterReveal);
     expect(
-      screen.getByRole("button", { name: "Shuffle numbers, count 2" }),
+      screen.getByRole("button", { name: "Shuffle numbers, count 1" }),
     ).toBeInTheDocument();
   });
 

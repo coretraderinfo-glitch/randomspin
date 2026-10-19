@@ -111,6 +111,8 @@ function isPrivateDrawStateResponse(
 }
 
 const NUMBER_ROLLER_FAST_INTERVAL_MS = 52;
+const NUMBER_ROLLER_SHUFFLE_INTERVAL_MS = 52;
+const NUMBER_ROLLER_SHUFFLE_TRANSITIONS = 7;
 const NUMBER_ROLLER_MIN_ACTIVE_MS = 1120;
 const NUMBER_ROLLER_REDUCED_MOTION_MIN_ACTIVE_MS = 620;
 const NUMBER_ROLLER_FINAL_DELAYS_MS = [100, 140, 190, 260];
@@ -152,6 +154,13 @@ function shuffleNumbers(numbers: readonly number[]) {
   return shuffled;
 }
 
+function hasSameNumberOrder(
+  left: readonly number[],
+  right: readonly number[],
+) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 export function PublicHome({
   settings,
   initialResults,
@@ -171,6 +180,8 @@ export function PublicHome({
   const [result, setResult] = useState<WinnerResult | null>(null);
   const [spinning, setSpinning] = useState(false);
   const [spinPreflight, setSpinPreflight] = useState(false);
+  const [postRevealShuffleResetPending, setPostRevealShuffleResetPending] =
+    useState(false);
   const [hasCompletedSpin, setHasCompletedSpin] = useState(false);
   const [rollerNumber, setRollerNumber] = useState(settings.defaultFrom);
   const [rollerPhase, setRollerPhase] = useState<
@@ -179,6 +190,7 @@ export function PublicHome({
   const [rollerTempo, setRollerTempo] = useState<
     "READY" | "FAST" | "SLOW" | "WINNING"
   >("READY");
+  const [rollerShuffleMixing, setRollerShuffleMixing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<"neutral" | "danger">(
     "neutral",
@@ -206,6 +218,7 @@ export function PublicHome({
     to: settings.defaultTo,
   });
   const spinActiveRef = useRef(false);
+  const postRevealShuffleResetRef = useRef(false);
   const spinStartedAtRef = useRef(0);
   const neutralFrameAtRef = useRef(0);
   const kinematicsRef = useRef<SpinKinematics>({
@@ -213,6 +226,10 @@ export function PublicHome({
     velocity: 0,
   });
   const rollerTimerRef = useRef<number | null>(null);
+  const rollerShuffleTimerRef = useRef<number | null>(null);
+  const rollerShuffleQueueRef = useRef(0);
+  const rollerShuffleMixingRef = useRef(false);
+  const rollerShuffleLastNumberRef = useRef<number | null>(null);
   const rollerSequenceRef = useRef<number[]>([]);
   const rollerSequenceIndexRef = useRef(0);
   const rollerLastPlaceholderRef = useRef<number | null>(null);
@@ -279,7 +296,8 @@ export function PublicHome({
   const [viewMode, setViewMode] =
     useState<PrivateDrawDisplayStyle>(initialViewMode);
   const showNumberRoller = viewMode === PRIVATE_DRAW_NUMBER_ROLLER_DISPLAY;
-  const spinBusy = spinPreflight || spinning;
+  const spinBusy =
+    spinPreflight || spinning || postRevealShuffleResetPending;
   const [rangeSaveMessage, setRangeSaveMessage] = useState<string | null>(null);
   const [rangeSaveTone, setRangeSaveTone] = useState<"neutral" | "danger">(
     "neutral",
@@ -426,6 +444,17 @@ export function PublicHome({
     shuffleCount,
     visibleWheelNumbers,
   ]);
+
+  useEffect(() => {
+    if (!result || !postRevealShuffleResetRef.current) {
+      return;
+    }
+
+    postRevealShuffleResetRef.current = false;
+    setShuffleCount(0);
+    setPostRevealShuffleResetPending(false);
+    spinActiveRef.current = false;
+  }, [result]);
 
   useEffect(() => {
     if (!spinActiveRef.current) {
@@ -772,6 +801,10 @@ export function PublicHome({
         window.clearTimeout(rollerTimerRef.current);
       }
 
+      if (rollerShuffleTimerRef.current !== null) {
+        window.clearTimeout(rollerShuffleTimerRef.current);
+      }
+
       if (saveRangeTimerRef.current !== null) {
         window.clearTimeout(saveRangeTimerRef.current);
       }
@@ -1077,6 +1110,59 @@ export function PublicHome({
     );
   }
 
+  function getNextRollerShuffleNumber() {
+    const rangeSize = Math.max(to - from + 1, 1);
+    let next = from + Math.floor(Math.random() * rangeSize);
+
+    if (rangeSize > 1 && next === rollerShuffleLastNumberRef.current) {
+      next = from + ((next - from + 1) % rangeSize);
+    }
+
+    rollerShuffleLastNumberRef.current = next;
+    return next;
+  }
+
+  function runQueuedRollerShuffle() {
+    if (rollerShuffleQueueRef.current <= 0) {
+      rollerShuffleMixingRef.current = false;
+      setRollerShuffleMixing(false);
+      return;
+    }
+
+    rollerShuffleQueueRef.current -= 1;
+    rollerShuffleMixingRef.current = true;
+    setRollerShuffleMixing(true);
+    setRollerNumber(getNextRollerShuffleNumber());
+    let transitions = 1;
+
+    const tick = () => {
+      if (transitions >= NUMBER_ROLLER_SHUFFLE_TRANSITIONS) {
+        rollerShuffleTimerRef.current = null;
+        runQueuedRollerShuffle();
+        return;
+      }
+
+      setRollerNumber(getNextRollerShuffleNumber());
+      transitions += 1;
+      rollerShuffleTimerRef.current = window.setTimeout(
+        tick,
+        NUMBER_ROLLER_SHUFFLE_INTERVAL_MS,
+      );
+    };
+
+    rollerShuffleTimerRef.current = window.setTimeout(
+      tick,
+      NUMBER_ROLLER_SHUFFLE_INTERVAL_MS,
+    );
+  }
+
+  function queueRollerShuffle() {
+    rollerShuffleQueueRef.current += 1;
+    if (!rollerShuffleMixingRef.current) {
+      runQueuedRollerShuffle();
+    }
+  }
+
   function finishNumberRoller(winningNumber: number, onComplete: () => void) {
     const beginFinalSlowdown = () => {
       clearSpinTimers();
@@ -1252,7 +1338,7 @@ export function PublicHome({
   }
 
   async function spin() {
-    if (spinActiveRef.current) {
+    if (spinActiveRef.current || rollerShuffleMixingRef.current) {
       return;
     }
 
@@ -1352,6 +1438,26 @@ export function PublicHome({
       return;
     }
 
+    let visualNumberOrderForSpin = visibleWheelNumbers;
+    if (!showNumberRoller) {
+      const sequentialNumbers = getSequentialNumbers(activeFrom, activeTo);
+      const currentOrder =
+        visibleWheelNumbers.length === sequentialNumbers.length &&
+        visibleWheelNumbers.every((value) => sequentialNumbers.includes(value))
+          ? visibleWheelNumbers
+          : sequentialNumbers;
+      const shouldNormalizeCompletedOrder =
+        shuffleCount === 0 &&
+        !hasSameNumberOrder(currentOrder, sequentialNumbers);
+      visualNumberOrderForSpin = shouldNormalizeCompletedOrder
+        ? sequentialNumbers
+        : currentOrder;
+
+      if (!hasSameNumberOrder(visibleWheelNumbers, visualNumberOrderForSpin)) {
+        setVisibleWheelNumbers(visualNumberOrderForSpin);
+      }
+    }
+
     setSpinPreflight(false);
     setSpinning(true);
     setMessageTone("neutral");
@@ -1427,6 +1533,10 @@ export function PublicHome({
                 ...current,
               ].slice(0, 10),
             );
+            // Keep the landed order in place for the completed result. The
+            // next draw cycle will normalize it before it begins.
+            postRevealShuffleResetRef.current = true;
+            setPostRevealShuffleResetPending(true);
             if (drawMode.kind === "private" && data.nextLabel) {
               setLiveDrawModeLabel(data.nextLabel);
             }
@@ -1443,7 +1553,6 @@ export function PublicHome({
             // visibly established, so the stopped pointer cannot be remapped.
             setSpinning(false);
             setSpinPreflight(false);
-            spinActiveRef.current = false;
             playWinnerSoundSafely();
           },
           showNumberRoller ? 1200 : 380,
@@ -1463,7 +1572,7 @@ export function PublicHome({
           from: effectiveFrom,
           to: effectiveTo,
           renderedSegmentCount: visualPlan.renderedSegmentCount,
-          visualNumberOrder: visibleWheelNumbers,
+          visualNumberOrder: visualNumberOrderForSpin,
           onComplete: completeSpin,
         });
       }
@@ -1512,7 +1621,6 @@ export function PublicHome({
 
   function closeResult() {
     setResult(null);
-    setHighlightedWinner(null);
   }
 
   async function shareResult() {
@@ -1534,7 +1642,7 @@ export function PublicHome({
   }
 
   function reset() {
-    if (spinActiveRef.current) {
+    if (spinActiveRef.current || rollerShuffleMixingRef.current) {
       return;
     }
 
@@ -1568,7 +1676,7 @@ export function PublicHome({
   }
 
   function switchView(nextView: PrivateDrawDisplayStyle) {
-    if (spinActiveRef.current || spinBusy) {
+    if (spinActiveRef.current || spinBusy || rollerShuffleMixingRef.current) {
       return;
     }
 
@@ -1580,6 +1688,12 @@ export function PublicHome({
       return;
     }
 
+    setShuffleCount((current) => current + 1);
+    if (showNumberRoller) {
+      queueRollerShuffle();
+      return;
+    }
+
     setVisibleWheelNumbers((current) => {
       const sequentialNumbers = getSequentialNumbers(from, to);
       const currentOrder =
@@ -1587,13 +1701,14 @@ export function PublicHome({
         current.every((value) => sequentialNumbers.includes(value))
           ? current
           : sequentialNumbers;
-      return shuffleNumbers(currentOrder);
+      const freshShuffleBase =
+        shuffleCount === 0 ? sequentialNumbers : currentOrder;
+      return shuffleNumbers(freshShuffleBase);
     });
-    setShuffleCount((current) => current + 1);
   }
 
   function resetShuffleCount() {
-    if (spinning) {
+    if (spinning || rollerShuffleMixingRef.current) {
       return;
     }
 
@@ -1713,7 +1828,7 @@ export function PublicHome({
                       : "view-mode-button-idle"
                   }`}
                   type="button"
-                  disabled={spinBusy}
+                  disabled={spinBusy || rollerShuffleMixing}
                   aria-pressed={viewMode === PRIVATE_DRAW_WHEEL_DISPLAY}
                   onClick={() => switchView(PRIVATE_DRAW_WHEEL_DISPLAY)}
                 >
@@ -1727,7 +1842,7 @@ export function PublicHome({
                       : "view-mode-button-idle"
                   }`}
                   type="button"
-                  disabled={spinBusy}
+                  disabled={spinBusy || rollerShuffleMixing}
                   aria-pressed={viewMode === PRIVATE_DRAW_NUMBER_ROLLER_DISPLAY}
                   onClick={() => switchView(PRIVATE_DRAW_NUMBER_ROLLER_DISPLAY)}
                 >
@@ -1753,6 +1868,7 @@ export function PublicHome({
                 phase={rollerPhase}
                 tempo={rollerTempo}
                 spinning={spinning}
+                shuffling={rollerShuffleMixing}
               />
             ) : (
               <LuckyWheel
@@ -1780,10 +1896,10 @@ export function PublicHome({
               <button
                 className="gold-button focus-ring min-h-12 w-full max-w-[18rem] rounded-xl px-7 py-4 text-sm uppercase tracking-[0.18em] transition hover:scale-[1.02] active:translate-y-px disabled:opacity-60 sm:w-auto sm:min-w-[11rem]"
                 onClick={spin}
-                disabled={spinBusy || !canSpinDraw}
-                aria-label={spinBusy ? "SPINNING" : spinButtonLabel}
+                disabled={spinBusy || rollerShuffleMixing || !canSpinDraw}
+                aria-label={spinBusy ? "SPINNING" : rollerShuffleMixing ? "MIXING NUMBERS" : spinButtonLabel}
               >
-                {spinBusy ? "SPINNING" : spinButtonLabel}
+                {spinBusy ? "SPINNING" : rollerShuffleMixing ? "MIXING" : spinButtonLabel}
               </button>
               <button
                 className="event-action focus-ring flex min-h-12 items-center gap-2 rounded-xl px-4 py-3 text-sm font-black text-white disabled:opacity-60"
@@ -1799,7 +1915,7 @@ export function PublicHome({
                 className="event-action focus-ring min-h-12 rounded-xl px-4 py-3 text-xs font-black uppercase tracking-[0.12em] text-white disabled:opacity-60"
                 type="button"
                 onClick={resetShuffleCount}
-                disabled={spinBusy || shuffleCount === 0}
+                disabled={spinBusy || rollerShuffleMixing || shuffleCount === 0}
                 aria-label="Reset shuffle count"
               >
                 RESET COUNT
@@ -1807,7 +1923,7 @@ export function PublicHome({
               <button
                 className="event-icon-action focus-ring size-12 rounded-xl text-white"
                 onClick={reset}
-                disabled={spinBusy}
+                disabled={spinBusy || rollerShuffleMixing}
                 aria-label="Reset"
               >
                 <RotateCcw className="size-4" />

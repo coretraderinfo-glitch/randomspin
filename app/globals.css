@@ -412,6 +412,10 @@ button:disabled {
   animation-duration: 3.4s;
 }
 
+.number-roller-orb.is-shuffling::before {
+  animation: number-roller-shuffle-ring 360ms ease-out 1;
+}
+
 .number-roller-orb.is-fast::before {
   animation-duration: 1.55s;
 }
@@ -505,6 +509,11 @@ button:disabled {
 .number-roller-orb.is-rolling .number-roller-particle {
   animation-duration: 2.7s;
   opacity: 0.82;
+}
+
+.number-roller-orb.is-shuffling .number-roller-particle {
+  animation-duration: 760ms;
+  opacity: 0.88;
 }
 
 .number-roller-orb.is-fast .number-roller-particle {
@@ -630,6 +639,23 @@ button:disabled {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes number-roller-shuffle-ring {
+  0% {
+    filter: brightness(1);
+    transform: rotate(0deg) scale(1);
+  }
+
+  45% {
+    filter: brightness(1.14);
+    transform: rotate(150deg) scale(1.015);
+  }
+
+  100% {
+    filter: brightness(1);
+    transform: rotate(360deg) scale(1);
   }
 }
 
