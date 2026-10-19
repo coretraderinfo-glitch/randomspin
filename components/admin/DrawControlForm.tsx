@@ -152,18 +152,12 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
 
     if (action === "set" && mode !== "OPERATOR") {
       setError("Switch to Operator Winner mode before setting the next winner.");
-      if (options.live) {
-        setLiveStatus("Unable to update");
-      }
       setMessage(null);
       return;
     }
 
     if (action === "set" && !submittedNextWinner.trim()) {
       setError("Enter a next winner before setting it.");
-      if (options.live) {
-        setLiveStatus("Unable to update");
-      }
       setMessage(null);
       return;
     }
@@ -274,7 +268,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
   function addLiveExcludedNumber(value: string) {
     const parsed = Number(value);
     if (!Number.isInteger(parsed)) {
-      setLiveStatus("Unable to update");
+      setError("Enter a whole number to exclude.");
       return;
     }
 

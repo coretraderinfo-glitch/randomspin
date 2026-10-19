@@ -288,9 +288,64 @@ describe("private draw next round winner admin control", () => {
   it("disables next winner entry while the draw is random", () => {
     render(<DrawControlForm draw={{ ...baseDraw, mode: "RANDOM", pendingOperatorWinner: null }} />);
 
+    expect(screen.getByRole("status")).toHaveTextContent("Random ready");
     expect(screen.getByText("Switch Draw Mode to Operator Winner before setting a confirmed number.")).toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: "Next Confirmed Number" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "SET NEXT WINNER" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "CLEAR" })).toBeDisabled();
+  });
+
+  it("persists operator mode and keeps next-winner controls enabled after a refreshed live range", async () => {
+    const operatorDraw = { ...baseDraw, mode: "OPERATOR" as const, pendingOperatorWinner: null };
+    const armedDraw = { ...operatorDraw, pendingOperatorWinner: 20 };
+    const refreshedDraw = { ...armedDraw, maxNumber: 40 };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ draw: operatorDraw, message: "Draw settings saved." }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ draw: armedDraw, message: "" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ draw: refreshedDraw }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DrawControlForm draw={{ ...baseDraw, mode: "RANDOM", pendingOperatorWinner: null }} />);
+
+    const nextWinnerInput = screen.getByRole("spinbutton", { name: "Next Confirmed Number" });
+    expect(nextWinnerInput).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Draw Mode"), { target: { value: "OPERATOR" } });
+    expect(nextWinnerInput).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "SAVE CHANGES" }));
+    await waitFor(() => expect(screen.getByText("Draw settings saved.")).toBeInTheDocument());
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body ?? "{}"))).toEqual(
+      expect.objectContaining({ mode: "OPERATOR" })
+    );
+    expect(nextWinnerInput).toBeEnabled();
+
+    fireEvent.change(nextWinnerInput, { target: { value: "20" } });
+    fireEvent.click(screen.getByRole("button", { name: "SET NEXT WINNER" }));
+    await waitFor(() => expect(screen.getByText("Next winner set successfully.")).toBeInTheDocument());
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body ?? "{}"))).toEqual(
+      expect.objectContaining({ mode: "OPERATOR", action: "set", nextWinner: 20 })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "REFRESH STATUS" }));
+    await waitFor(() => expect(screen.getByText("Next Winner: Set")).toBeInTheDocument());
+    expect(screen.getByText("Live range: 1–40")).toBeInTheDocument();
+    expect(nextWinnerInput).toBeEnabled();
   });
 });
