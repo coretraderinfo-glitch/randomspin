@@ -116,7 +116,7 @@ describe("private draw operator mode APIs", () => {
     return new NextRequest("http://localhost:3000/api/draw/A7K29P/spin", {
       method: "POST",
       body: JSON.stringify(body),
-      headers: { "content-type": "application/json" }
+      headers: { "content-type": "application/json", origin: "http://localhost:3000" }
     });
   }
 
@@ -139,6 +139,31 @@ describe("private draw operator mode APIs", () => {
     expect(mocks.privateDrawUpdate).not.toHaveBeenCalled();
   });
 
+  it("does not allow an unauthenticated viewer to create a private number result", async () => {
+    mocks.getAdminFromRequest.mockResolvedValue(null);
+    const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
+
+    const response = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "A7K29P" }) });
+
+    expect(response.status).toBe(401);
+    expect(mocks.privateDrawSpinCreate).not.toHaveBeenCalled();
+    expect(mocks.privateDrawUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a private number spin from another origin", async () => {
+    const { POST } = await import("@/app/api/draw/[publicCode]/spin/route");
+    const request = new NextRequest("http://localhost:3000/api/draw/A7K29P/spin", {
+      method: "POST",
+      body: "{}",
+      headers: { "content-type": "application/json", origin: "https://attacker.example" }
+    });
+
+    const response = await POST(request, { params: Promise.resolve({ publicCode: "A7K29P" }) });
+
+    expect(response.status).toBe(403);
+    expect(mocks.privateDrawSpinCreate).not.toHaveBeenCalled();
+  });
+
   it("admin can set a valid next confirmed number", async () => {
     mocks.privateDrawFindUnique.mockResolvedValue({ ...baseDraw, minNumber: 1, maxNumber: 30, excludedNumbers: [3, 9, 13, 18] });
     const { PUT } = await import("@/app/api/admin/draws/[id]/route");
@@ -158,6 +183,25 @@ describe("private draw operator mode APIs", () => {
       expect.objectContaining({
         data: expect.objectContaining({ mode: "OPERATOR", pendingOperatorWinner: 20 })
       })
+    );
+  });
+
+  it("ignores a stale next winner on an unrelated exclusion save after that winner was consumed", async () => {
+    const consumedDraw = { ...baseDraw, pendingOperatorWinner: null, excludedNumbers: [2, 4, 6, 8, 10] };
+    mocks.privateDrawFindUnique.mockResolvedValue(consumedDraw);
+    mocks.privateDrawUpdate.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ ...consumedDraw, ...data }));
+    const { PUT } = await import("@/app/api/admin/draws/[id]/route");
+
+    const response = await PUT(
+      adminRequest(adminPayload({ excludedNumbers: [2, 3, 4, 6, 8, 10], nextWinner: 7 })),
+      { params: Promise.resolve({ id: "draw-1" }) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.draw.pendingOperatorWinner).toBeNull();
+    expect(mocks.privateDrawUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ pendingOperatorWinner: null, excludedNumbers: "[2,3,4,6,8,10]" }) })
     );
   });
 

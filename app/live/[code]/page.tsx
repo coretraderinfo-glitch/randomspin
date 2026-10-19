@@ -87,6 +87,7 @@ export default async function PrivateDrawLivePage({ params }: { params: Promise<
           rangeEndpoint: `/api/draw/${encodeURIComponent(draw.publicCode)}/range`,
           rangeRevision: draw.revision,
           canEditRange: Boolean(adminSession),
+          canSpin: Boolean(adminSession),
           sharePath: canonicalPath
         }}
       />

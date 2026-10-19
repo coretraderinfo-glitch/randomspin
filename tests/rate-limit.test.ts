@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { rateLimit, resetRateLimitsForTests } from "@/lib/rate-limit";
 
 const redis = vi.hoisted(() => ({
@@ -16,11 +16,16 @@ vi.mock("@/lib/env", () => ({
 
 describe("rate limiting", () => {
   beforeEach(() => {
+    vi.stubEnv("NODE_ENV", "test");
     redis.configured = false;
     redis.issue = null;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     resetRateLimitsForTests();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("blocks after the limit is reached", () => {
@@ -73,6 +78,27 @@ describe("rate limiting", () => {
     expect(warning).toHaveBeenCalledWith(expect.stringContaining("Rate limit unavailable for public spin; continuing with fallback policy."));
   });
 
+  it("allows a draw to continue when Redis configuration is missing", async () => {
+    redis.issue = "missing Redis REST URL or token";
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await expect(rateLimit("redis:missing-config", 40, 60_000, { allowOnInfrastructureFailure: true, endpoint: "public spin" })).resolves.toEqual({
+      allowed: true,
+      usedAvailabilityFallback: true
+    });
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("Rate limit unavailable for public spin; continuing with fallback policy."));
+  });
+
+  it("allows a draw to continue when Redis rejects invalid credentials", async () => {
+    redis.configured = true;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 401 })));
+
+    await expect(rateLimit("redis:invalid-credentials", 40, 60_000, { allowOnInfrastructureFailure: true, endpoint: "public spin" })).resolves.toEqual({
+      allowed: true,
+      usedAvailabilityFallback: true
+    });
+  });
+
   it("allows draw availability fallback when fetch failed because DNS could not resolve Redis", async () => {
     redis.configured = true;
     const dnsError = Object.assign(new Error("getaddrinfo ENOTFOUND redis.test"), { code: "ENOTFOUND" });
@@ -102,5 +128,21 @@ describe("rate limiting", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
 
     await expect(rateLimit("admin-login:ip", 8, 60_000)).rejects.toMatchObject({ name: "RedisRateLimitUnavailableError" });
+  });
+
+  it("keeps security endpoints fail-closed when Redis configuration is missing", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    redis.issue = "missing Redis REST URL or token";
+
+    await expect(rateLimit("admin-login:missing-config", 8, 60_000)).resolves.toEqual({ allowed: false });
+    await expect(rateLimit("admin-totp:missing-config", 6, 60_000)).resolves.toEqual({ allowed: false });
+  });
+
+  it("keeps security endpoints fail-closed when Redis rejects credentials", async () => {
+    redis.configured = true;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 403 })));
+
+    await expect(rateLimit("admin-login:invalid-credentials", 8, 60_000)).rejects.toMatchObject({ name: "RedisRateLimitUnavailableError" });
+    await expect(rateLimit("admin-totp:invalid-credentials", 6, 60_000)).rejects.toMatchObject({ name: "RedisRateLimitUnavailableError" });
   });
 });

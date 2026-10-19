@@ -118,7 +118,7 @@ function audienceRequest(body: unknown = {}) {
   return new NextRequest("http://localhost:3000/api/player-draw/PLAYTEST/spin", {
     method: "POST",
     body: JSON.stringify(body),
-    headers: { "content-type": "application/json" }
+    headers: { "content-type": "application/json", origin: "http://localhost:3000" }
   });
 }
 
@@ -206,6 +206,18 @@ describe("RandomSpin Player Draw APIs", () => {
 
     expect(response.status).toBe(401);
     expect(mocks.playerDrawUpdate).not.toHaveBeenCalled();
+  });
+
+  it("does not allow an unauthenticated viewer to create a private player result or remove a winner", async () => {
+    mocks.getAdminFromRequest.mockResolvedValue(null);
+    mocks.playerDrawFindUnique.mockResolvedValue({ ...baseDraw, removeWinnerAfterWin: true });
+    const { POST } = await import("@/app/api/player-draw/[publicCode]/spin/route");
+
+    const response = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "PLAYTEST" }) });
+
+    expect(response.status).toBe(401);
+    expect(mocks.playerDrawResultCreate).not.toHaveBeenCalled();
+    expect(mocks.playerParticipantUpdate).not.toHaveBeenCalled();
   });
 
   it("admin can set a next operator participant", async () => {

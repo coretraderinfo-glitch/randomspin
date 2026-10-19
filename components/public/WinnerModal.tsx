@@ -34,12 +34,12 @@ export function WinnerModal({ result, onClose, onShare }: WinnerModalProps) {
       <motion.div
         initial={{ opacity: 0, scale: 0.94, y: 16 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="glass relative max-h-[calc(100svh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl p-5 text-center sm:p-8"
+        className="event-result-modal relative max-h-[calc(100svh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl p-5 text-center sm:p-8"
       >
         <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-[#f6d98f] to-transparent" />
         <button
           type="button"
-          className="focus-ring absolute right-4 top-4 grid size-11 place-items-center rounded-full border border-white/10 text-[#aeb7ca] hover:text-white"
+          className="event-icon-action focus-ring absolute right-4 top-4 size-11 rounded-full text-[#aeb7ca] hover:text-white"
           onClick={onClose}
           aria-label="Close result"
         >
@@ -53,7 +53,7 @@ export function WinnerModal({ result, onClose, onShare }: WinnerModalProps) {
           <p className="mt-1 text-xs text-[#8f9bb4]">{resultTime.utcTime}</p>
         </div>
 
-        <div className="my-5 grid gap-2 rounded-lg border border-white/10 bg-white/[0.045] p-4 text-left text-sm sm:my-6">
+        <div className="event-result-summary my-5 grid gap-2 rounded-xl p-4 text-left text-sm sm:my-6">
           {[
             ["Winning Number", result.winner],
             ["Range", `${result.from}–${result.to}`],
@@ -69,11 +69,11 @@ export function WinnerModal({ result, onClose, onShare }: WinnerModalProps) {
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <button className="gold-button focus-ring min-h-12 rounded-lg px-5 py-3 text-sm uppercase tracking-[0.14em]" onClick={onClose}>
+          <button className="gold-button focus-ring min-h-12 rounded-xl px-5 py-3 text-sm uppercase tracking-[0.14em]" onClick={onClose}>
             Close
           </button>
           <button
-            className="focus-ring flex min-h-12 items-center justify-center gap-2 rounded-lg border border-white/12 bg-white/8 px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-white hover:bg-white/12"
+            className="event-action focus-ring flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-white"
             onClick={onShare}
           >
             <Share2 className="size-4" />

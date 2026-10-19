@@ -10,6 +10,7 @@ const buckets = new Map<string, Bucket>();
 const warningTimes = new Map<string, number>();
 const REDIS_REQUEST_TIMEOUT_MS = 2_000;
 const WARNING_INTERVAL_MS = 60_000;
+let redisAvailability: "configured" | "unavailable" = "configured";
 
 export type RateLimitResult = {
   allowed: boolean;
@@ -44,6 +45,12 @@ export async function rateLimit(
       return await redisRateLimit(key, limit, windowMs);
     }
 
+    if (options.allowOnInfrastructureFailure) {
+      const unavailable = new RedisRateLimitUnavailableError("configuration");
+      warnRedisUnavailable(options.endpoint ?? "draw", unavailable);
+      return { allowed: true, usedAvailabilityFallback: true };
+    }
+
     if (process.env.NODE_ENV === "production") {
       warnMissingRedisConfiguration();
       return { allowed: false };
@@ -51,6 +58,10 @@ export async function rateLimit(
 
     return memoryRateLimit(key, limit, windowMs);
   } catch (error) {
+    if (error instanceof RedisRateLimitUnavailableError) {
+      redisAvailability = "unavailable";
+    }
+
     if (options.allowOnInfrastructureFailure && error instanceof RedisRateLimitUnavailableError) {
       warnRedisUnavailable(options.endpoint ?? "draw", error);
       return { allowed: true, usedAvailabilityFallback: true };
@@ -109,7 +120,7 @@ async function redisRateLimit(key: string, limit: number, windowMs: number): Pro
   }
 
   if (!response.ok) {
-    if (response.status >= 500) {
+    if (response.status === 401 || response.status === 403 || response.status >= 500) {
       throw new RedisRateLimitUnavailableError("http", `HTTP_${response.status}`);
     }
 
@@ -118,12 +129,23 @@ async function redisRateLimit(key: string, limit: number, windowMs: number): Pro
 
   const results = (await response.json()) as Array<{ result?: number | string }>;
   const count = Number(results[0]?.result ?? limit + 1);
+  redisAvailability = "configured";
   return { allowed: count <= limit };
 }
 
 export function resetRateLimitsForTests() {
   buckets.clear();
   warningTimes.clear();
+  redisAvailability = "configured";
+}
+
+/** This is an availability signal, not a Redis readiness probe. */
+export function getRedisRateLimitHealthState(): "configured" | "degraded" | "unavailable" {
+  if (!isRedisRateLimitConfigured()) {
+    return "degraded";
+  }
+
+  return redisAvailability;
 }
 
 function toRedisUnavailableError(error: unknown) {

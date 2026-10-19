@@ -147,8 +147,8 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
     action?: "set" | "clear",
     options: { live?: boolean; excludedTextValue?: string; nextWinnerValue?: string; successMessage?: string } = {}
   ) {
-    const submittedNextWinner = options.nextWinnerValue ?? nextWinner;
     const submittedExcludedText = options.excludedTextValue ?? excludedText;
+    const submittedNextWinner = options.nextWinnerValue ?? nextWinner;
 
     if (action === "set" && mode !== "OPERATOR") {
       setError("Switch to Operator Winner mode before setting the next winner.");
@@ -183,9 +183,14 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
       mode,
       displayStyle,
       isActive,
-      action,
-      nextWinner: action === "clear" ? null : mode === "OPERATOR" && submittedNextWinner.trim() ? Number(submittedNextWinner) : undefined
+      action
     };
+
+    if (action === "set") {
+      payload.nextWinner = Number(submittedNextWinner);
+    } else if (action === "clear") {
+      payload.nextWinner = null;
+    }
 
     if (!rangeLocked) {
       payload.minNumber = minNumber;
@@ -319,19 +324,19 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
       </section>
 
       {isActive ? (
-        <section className="glass rounded-xl p-4 sm:p-5">
+        <section className="event-panel rounded-xl p-4 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.22em] text-[#f6d98f]">Live Control</p>
-              <h3 className="mt-2 text-xl font-black text-white">Fast show controls</h3>
+              <h3 className="mt-2 text-xl font-black text-white">Live status</h3>
             </div>
-            <p className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-[#aeb7ca]">
+            <p className="event-status-pill rounded-full px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-[#aeb7ca]" role="status">
               {liveStatus}
             </p>
           </div>
 
-          <div className="mt-5 grid min-w-0 gap-5 lg:grid-cols-[0.8fr_1.2fr]">
-            <div>
+          <div className="mt-5 grid min-w-0 gap-5 lg:grid-cols-[0.8fr_1.2fr] lg:divide-x lg:divide-[rgba(35,59,104,0.1)]">
+            <div className="min-w-0 lg:pr-5">
               <p className="text-xs font-black uppercase tracking-[0.18em] text-[#aeb7ca]">Next Winner</p>
               <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
                 <input
@@ -369,7 +374,7 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
               {mode !== "OPERATOR" ? <p className="mt-2 text-sm text-[#aeb7ca]">Switch to Operator Winner mode before arming a next winner.</p> : null}
             </div>
 
-            <div>
+            <div className="min-w-0 lg:pl-5">
               <p className="text-xs font-black uppercase tracking-[0.18em] text-[#aeb7ca]">Exclusions</p>
               {numbers.length > 0 ? (
                 <div className="mt-3 grid grid-cols-5 gap-2 sm:grid-cols-8 md:grid-cols-10">
@@ -448,9 +453,10 @@ export function DrawControlForm({ draw }: DrawControlFormProps) {
         </section>
       ) : null}
 
-      <section className="glass rounded-xl p-5">
+      <section className="event-panel rounded-xl p-5">
         <div className="mb-5">
-          <p className="text-xs font-black uppercase tracking-[0.22em] text-[#f6d98f]">Default View</p>
+          <p className="text-xs font-black uppercase tracking-[0.22em] text-[#f6d98f]">Draw Settings</p>
+          <p className="mt-2 text-sm font-bold text-[#aeb7ca]">Default View</p>
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {[
               { value: "WHEEL", label: "Wheel", disabled: false },

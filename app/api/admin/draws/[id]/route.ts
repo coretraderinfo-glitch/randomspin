@@ -118,6 +118,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return jsonError("Starting range is required for inactive draws.", 400);
     }
 
+    if (parsed.data.action === "set" && parsed.data.nextWinner === undefined) {
+      return jsonError("A next winner is required when setting the next draw.", 400);
+    }
+
     const effectiveMinNumber = previous.isActive ? previous.minNumber : (parsed.data.minNumber ?? previous.minNumber);
     const effectiveMaxNumber = previous.isActive ? previous.maxNumber : (parsed.data.maxNumber ?? previous.maxNumber);
     const result = await updatePrivateDraw({
@@ -132,7 +136,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         mode: parsed.data.mode as PrivateDrawMode,
         displayStyle: parsed.data.displayStyle,
         isActive: parsed.data.isActive,
-        nextWinner: parsed.data.nextWinner,
+        // Pending winners are deliberately an explicit mutation. General saves,
+        // including live exclusion changes, must never re-arm a stale form value.
+        nextWinner: parsed.data.action === "set" ? parsed.data.nextWinner : parsed.data.action === "clear" ? null : undefined,
         clearPendingWinner: parsed.data.action === "clear",
         allowExcludedOutsideRange: previous.isActive
       }

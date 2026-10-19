@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { LuckyPlayerHome } from "@/components/public/LuckyPlayerHome";
+import { getCurrentAdmin } from "@/lib/auth";
 import { getPlayerDrawAudience } from "@/lib/player-draws";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +20,7 @@ export default async function PlayerDrawAudiencePage({ params }: { params: Promi
   const nonce = (await headers()).get("x-nonce") ?? undefined;
   const { publicCode: rawPublicCode } = await params;
   const publicCode = normalizePublicCode(rawPublicCode);
-  const draw = await getPlayerDrawAudience(publicCode);
+  const [draw, adminSession] = await Promise.all([getPlayerDrawAudience(publicCode), getCurrentAdmin()]);
 
   if (!draw) {
     notFound();
@@ -51,7 +52,8 @@ export default async function PlayerDrawAudiencePage({ params }: { params: Promi
           participantCount: draw.participantCount,
           eligibleCount: draw.eligibleCount,
           removeWinnerAfterWin: draw.removeWinnerAfterWin,
-          showParticipantList: draw.showParticipantList
+          showParticipantList: draw.showParticipantList,
+          canOperate: Boolean(adminSession)
         }}
       />
     </>

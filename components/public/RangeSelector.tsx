@@ -156,10 +156,10 @@ export const RangeSelector = forwardRef<RangeSelectorHandle, RangeSelectorProps>
   return (
     <label className="block">
       <span className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-[#aeb7ca]">{label}</span>
-      <span className="glass grid grid-cols-[44px_minmax(72px,1fr)_44px] items-center overflow-hidden rounded-lg">
+      <span className="event-panel grid grid-cols-[44px_minmax(72px,1fr)_44px] items-center overflow-hidden rounded-xl">
         <button
           type="button"
-          className="focus-ring grid h-12 place-items-center text-[#f6d98f] transition hover:bg-white/10"
+          className="focus-ring grid h-12 place-items-center text-[#f6d98f] transition hover:bg-white/70"
           onClick={() => step(-1)}
           aria-label={`Decrease ${label}`}
           disabled={readOnly}
@@ -195,7 +195,7 @@ export const RangeSelector = forwardRef<RangeSelectorHandle, RangeSelectorProps>
         />
         <button
           type="button"
-          className="focus-ring grid h-12 place-items-center text-[#f6d98f] transition hover:bg-white/10"
+          className="focus-ring grid h-12 place-items-center text-[#f6d98f] transition hover:bg-white/70"
           onClick={() => step(1)}
           aria-label={`Increase ${label}`}
           disabled={readOnly}

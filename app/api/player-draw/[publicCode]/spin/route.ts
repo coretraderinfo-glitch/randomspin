@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAdminFromRequest } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { PlayerDrawNotFoundError, createPrivatePlayerDrawSpin } from "@/lib/player-draws";
 import { rateLimit } from "@/lib/rate-limit";
-import { getClientIp, hashIp, jsonError, sanitizeUserAgent } from "@/lib/security";
+import { getClientIp, hashIp, jsonError, requireSameOrigin, sanitizeUserAgent } from "@/lib/security";
 import { SpinValidationError } from "@/lib/spin";
 
 export const runtime = "nodejs";
@@ -10,6 +11,15 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ publicCode: string }> }) {
   try {
+    if (!requireSameOrigin(request)) {
+      return jsonError("Invalid request origin.", 403);
+    }
+
+    const admin = await getAdminFromRequest(request);
+    if (!admin) {
+      return jsonError("Unauthorized.", 401);
+    }
+
     await request.json().catch(() => null);
     const { publicCode } = await params;
     const ip = getClientIp(request);

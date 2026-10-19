@@ -137,6 +137,8 @@ describe("private draw next round winner admin control", () => {
     render(<DrawControlForm draw={baseDraw} />);
 
     expect(screen.getByText("Live Control")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Random ready");
+    expect(screen.getByRole("status")).not.toHaveAttribute("aria-label");
 
     fireEvent.change(screen.getByRole("spinbutton", { name: "Live Next Winner" }), { target: { value: "15" } });
     fireEvent.click(screen.getByRole("button", { name: "SET NEXT" }));
@@ -208,6 +210,27 @@ describe("private draw next round winner admin control", () => {
     fireEvent.click(screen.getByRole("button", { name: "CONFIRM CLEAR" }));
     await waitFor(() => expect(screen.getByText("Exclusions cleared")).toBeInTheDocument());
     expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body ?? "{}")).excludedText).toBe("");
+  });
+
+  it("does not re-submit stale next-winner text when updating exclusions", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ draw: { ...baseDraw, pendingOperatorWinner: null, excludedNumbers: [3, 8, 9, 13, 18] }, message: "" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DrawControlForm draw={{ ...baseDraw, pendingOperatorWinner: 7 }} />);
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Live Next Winner" }), { target: { value: "7" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "8" })[0]);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body ?? "{}"));
+    expect(body).not.toHaveProperty("nextWinner");
+    expect(body).not.toHaveProperty("action");
+    await waitFor(() => expect(screen.getByText("Next Winner: Not set")).toBeInTheDocument());
+    expect(screen.getByRole("spinbutton", { name: "Live Next Winner" })).toHaveValue(null);
   });
 
   it("clears a next winner with a clear success message", async () => {
