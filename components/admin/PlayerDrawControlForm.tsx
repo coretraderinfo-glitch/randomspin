@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Download, Save, Search, Trash2 } from "lucide-react";
 import { SuccessBanner, normalizeFeedbackMessage } from "@/components/admin/feedback";
 
@@ -91,6 +91,8 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingParticipants, setSavingParticipants] = useState(false);
+  const [refreshingParticipants, setRefreshingParticipants] = useState(false);
+  const refreshInFlightRef = useRef(false);
   const [participantDirty, setParticipantDirty] = useState(false);
   const [savingAction, setSavingAction] = useState<"save" | "set" | "clear" | null>(null);
 
@@ -103,7 +105,7 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
     return () => window.clearTimeout(timer);
   }, [message]);
   const eligibleParticipants = state.participants.filter((participant) => participant.isEligible);
-  const isBusy = saving || savingParticipants;
+  const isBusy = saving || savingParticipants || refreshingParticipants;
   const filteredParticipants = state.participants
     .filter((participant) => `${participant.displayName} ${participant.reference ?? ""}`.toLowerCase().includes(query.toLowerCase()))
     .slice(0, 240);
@@ -229,6 +231,46 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
     }
   }
 
+  async function refreshParticipants() {
+    if (isBusy || refreshInFlightRef.current) {
+      return;
+    }
+    if (
+      participantDirty &&
+      !window.confirm(
+        "You have unsaved participant changes. Refreshing will discard them.",
+      )
+    ) {
+      return;
+    }
+
+    refreshInFlightRef.current = true;
+    setRefreshingParticipants(true);
+    setMessage(null);
+    setError(null);
+    try {
+      const response = await fetch(`/api/admin/player-draws/${state.id}`);
+      const data = (await response.json()) as DrawResponse;
+      if (!response.ok || !data.draw?.participants || !data.draw.updatedAt) {
+        setError("Unable to refresh participants.");
+        return;
+      }
+
+      setState((current) => ({
+        ...current,
+        participants: data.draw?.participants ?? current.participants,
+        revision: data.draw?.updatedAt ?? current.revision,
+      }));
+      setParticipantDirty(false);
+      setMessage("Participants refreshed.");
+    } catch {
+      setError("Unable to refresh participants.");
+    } finally {
+      refreshInFlightRef.current = false;
+      setRefreshingParticipants(false);
+    }
+  }
+
   function addPastedParticipants() {
     const parsed = parseParticipants(pasteText);
     if (parsed.length === 0) {
@@ -350,10 +392,15 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
             <p className="text-xs font-black uppercase tracking-[0.22em] text-[#f6d98f]">Participants</p>
             <p className="mt-2 text-sm text-[#aeb7ca]">{state.participants.length} total · {eligibleParticipants.length} eligible</p>
           </div>
-          <label className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#8f9bb4]" />
-            <input className="focus-ring h-10 rounded-lg border border-white/10 bg-white/[0.06] pl-9 pr-3 text-sm text-white" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" />
-          </label>
+          <div className="flex flex-wrap items-center gap-3">
+            <button className="focus-ring rounded-lg border border-white/12 bg-white/8 px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60" type="button" disabled={isBusy} onClick={() => void refreshParticipants()}>
+              {refreshingParticipants ? "REFRESHING..." : "REFRESH PARTICIPANTS"}
+            </button>
+            <label className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#8f9bb4]" />
+              <input className="focus-ring h-10 rounded-lg border border-white/10 bg-white/[0.06] pl-9 pr-3 text-sm text-white" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" />
+            </label>
+          </div>
         </div>
 
         <div className="grid gap-3">

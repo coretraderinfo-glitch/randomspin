@@ -533,6 +533,30 @@ export async function updatePlayerDraw({
   });
 }
 
+export async function setPlayerDrawRemoveWinnerAfterWin({
+  id,
+  removeWinnerAfterWin,
+}: {
+  id: string;
+  removeWinnerAfterWin: boolean;
+}) {
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.playerDraw.findUnique({ where: { id } });
+
+    if (!existing) {
+      throw new PlayerDrawNotFoundError();
+    }
+    if (!existing.isActive || existing.archivedAt) {
+      throw new PlayerDrawStateError("This player draw is not active.");
+    }
+
+    return tx.playerDraw.update({
+      where: { id },
+      data: { removeWinnerAfterWin },
+    });
+  });
+}
+
 export async function replacePlayerDrawParticipants({
   id,
   revision,

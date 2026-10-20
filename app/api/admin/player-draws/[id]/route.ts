@@ -11,6 +11,7 @@ import {
   deletePlayerDrawPermanently,
   getPlayerDrawForAdmin,
   restorePlayerDraw,
+  setPlayerDrawRemoveWinnerAfterWin,
   updatePlayerDraw,
   type PlayerDrawMode,
 } from "@/lib/player-draws";
@@ -31,9 +32,15 @@ const playerDrawSchema = z.object({
   action: z.enum(["set", "clear", "save"]).optional(),
 }).strict();
 
-const playerDrawArchiveActionSchema = z.object({
-  action: z.enum(["archive", "restore"]),
-});
+const playerDrawPatchSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.enum(["archive", "restore"]),
+  }).strict(),
+  z.object({
+    action: z.literal("set-remove-winner-after-win"),
+    removeWinnerAfterWin: z.boolean(),
+  }).strict(),
+]);
 
 const deleteConfirmationSchema = z.object({
   confirmation: z.literal("PERMANENTLY DELETE"),
@@ -150,7 +157,7 @@ export async function PATCH(
       return jsonError("Unauthorized.", 401);
     }
 
-    const parsed = playerDrawArchiveActionSchema.safeParse(
+    const parsed = playerDrawPatchSchema.safeParse(
       await request.json().catch(() => null),
     );
     if (!parsed.success) {
@@ -158,6 +165,29 @@ export async function PATCH(
     }
 
     const { id } = await params;
+    if (parsed.data.action === "set-remove-winner-after-win") {
+      const updated = await setPlayerDrawRemoveWinnerAfterWin({
+        id,
+        removeWinnerAfterWin: parsed.data.removeWinnerAfterWin,
+      });
+      const draw = await getPlayerDrawForAdmin(id);
+      if (!draw) {
+        throw new PlayerDrawNotFoundError();
+      }
+
+      await logAdminAudit({
+        adminUserId: admin.id,
+        action: "PLAYER_DRAW_REMOVE_WINNER_AFTER_WIN_UPDATED",
+        target: `PlayerDraw:${draw.id}`,
+        request,
+        metadata: {
+          removeWinnerAfterWin: updated.removeWinnerAfterWin,
+        },
+      });
+
+      return NextResponse.json({ draw });
+    }
+
     const draw =
       parsed.data.action === "archive"
         ? await archivePlayerDraw(id)

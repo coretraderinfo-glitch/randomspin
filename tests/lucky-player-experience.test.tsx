@@ -773,6 +773,235 @@ describe("RandomSpin Player Draw public experience", () => {
     expect(
       screen.queryByRole("button", { name: "SHUFFLE" }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("checkbox", { name: "Remove winner after win" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reflects a persisted private winner-removal setting on a fresh render", () => {
+    render(
+      <LuckyPlayerHome
+        initialParticipants={drawParticipants.slice(0, 2)}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "RANDOM DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 2,
+          eligibleCount: 2,
+          removeWinnerAfterWin: true,
+          showParticipantList: true,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "RANDOM",
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByRole("checkbox", { name: "Remove winner after win" }),
+    ).toBeChecked();
+  });
+
+  it("saves private winner removal through the settings endpoint and keeps the winner ineligible after a draw", async () => {
+    const privateParticipants = drawParticipants.slice(0, 2);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            draw: {
+              removeWinnerAfterWin: true,
+              participants: privateParticipants,
+              updatedAt: "2026-08-21T00:01:00.000Z",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(successfulPlayerResponse("Alice", "player-1"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <LuckyPlayerHome
+        initialParticipants={privateParticipants}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "RANDOM DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 2,
+          eligibleCount: 2,
+          removeWinnerAfterWin: false,
+          showParticipantList: true,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "RANDOM",
+          showReferencesPublicly: true,
+          revision: "2026-08-21T00:00:00.000Z",
+        }}
+      />,
+    );
+
+    const winnerRemoval = screen.getByRole("checkbox", {
+      name: "Remove winner after win",
+    });
+    fireEvent.click(winnerRemoval);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(winnerRemoval).toBeChecked();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/player-draws/player-draw-1",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+    const payload = JSON.parse(
+      String((fetchMock.mock.calls[0]?.[1] as RequestInit).body),
+    ) as Record<string, unknown>;
+    expect(payload).toEqual({
+      action: "set-remove-winner-after-win",
+      removeWinnerAfterWin: true,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+    await finishDraw();
+
+    expect(screen.getByText("2 PLAYERS READY")).toBeInTheDocument();
+    expect(screen.getByText("1 Eligible")).toBeInTheDocument();
+    expect(screen.getByLabelText("Alice eligibility")).toHaveTextContent("Ineligible");
+  });
+
+  it("keeps the last authoritative winner-removal value when its settings save fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "Not saved" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    render(
+      <LuckyPlayerHome
+        initialParticipants={drawParticipants.slice(0, 2)}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "RANDOM DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 2,
+          eligibleCount: 2,
+          removeWinnerAfterWin: false,
+          showParticipantList: true,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "RANDOM",
+        }}
+      />,
+    );
+
+    const winnerRemoval = screen.getByRole("checkbox", {
+      name: "Remove winner after win",
+    });
+    fireEvent.click(winnerRemoval);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(winnerRemoval).not.toBeChecked();
+    expect(
+      screen.getByText("Unable to update winner removal setting."),
+    ).toBeInTheDocument();
+  });
+
+  it("blocks duplicate private winner-removal saves while the setting is pending", async () => {
+    let resolveSave: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn().mockReturnValue(
+      new Promise<Response>((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <LuckyPlayerHome
+        initialParticipants={drawParticipants.slice(0, 2)}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "RANDOM DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 2,
+          eligibleCount: 2,
+          removeWinnerAfterWin: false,
+          showParticipantList: true,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "RANDOM",
+        }}
+      />,
+    );
+
+    const winnerRemoval = screen.getByRole("checkbox", {
+      name: "Remove winner after win",
+    });
+    fireEvent.click(winnerRemoval);
+    fireEvent.click(winnerRemoval);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(winnerRemoval).toBeDisabled();
+
+    resolveSave?.(
+      new Response(
+        JSON.stringify({
+          draw: {
+            removeWinnerAfterWin: true,
+            participants: drawParticipants.slice(0, 2),
+            updatedAt: "2026-08-21T00:01:00.000Z",
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(winnerRemoval).toBeChecked();
+  });
+
+  it("locks winner removal for the private live draw lifecycle", () => {
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise<Response>(() => {})));
+
+    render(
+      <LuckyPlayerHome
+        initialParticipants={drawParticipants.slice(0, 2)}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "RANDOM DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 2,
+          eligibleCount: 2,
+          removeWinnerAfterWin: false,
+          showParticipantList: true,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "RANDOM",
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "LIVE DRAW" }));
+    expect(
+      screen.getByRole("checkbox", { name: "Remove winner after win" }),
+    ).toBeDisabled();
   });
 
   it("persists private operator participant replacement before updating the live list", async () => {

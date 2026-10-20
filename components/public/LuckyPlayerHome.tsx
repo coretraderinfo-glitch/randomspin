@@ -53,6 +53,15 @@ type PlayerSpinResponse = PlayerWinnerResult & {
   error?: never;
 };
 
+type PlayerDrawSettingsResponse = {
+  error?: string;
+  draw?: {
+    removeWinnerAfterWin?: boolean;
+    participants?: PlayerParticipantView[];
+    updatedAt?: string;
+  };
+};
+
 const finishingDelays = [100, 140, 190, 260];
 const reducedMotionFinishingDelays = [140, 200, 280];
 const winnerHoldMs = 1200;
@@ -236,6 +245,10 @@ export function LuckyPlayerHome({
   const [countdownValue, setCountdownValue] = useState<number | null>(null);
   const [spinning, setSpinning] = useState(false);
   const [savingPlayers, setSavingPlayers] = useState(false);
+  const [savingWinnerRemoval, setSavingWinnerRemoval] = useState(false);
+  const [removeWinnerAfterWin, setRemoveWinnerAfterWin] = useState(
+    mode.kind === "private" ? mode.removeWinnerAfterWin : false,
+  );
   const [participantRevision, setParticipantRevision] = useState(mode.kind === "private" ? mode.revision ?? "" : "");
   const [hasCompletedDraw, setHasCompletedDraw] = useState(false);
   const [result, setResult] = useState<PlayerWinnerResult | null>(null);
@@ -259,6 +272,7 @@ export function LuckyPlayerHome({
   const clearAllTimerRef = useRef<number | null>(null);
   const audioRef = useRef<AudioContext | null>(null);
   const spinInFlightRef = useRef(false);
+  const winnerRemovalSaveInFlightRef = useRef(false);
   const cursorRef = useRef(0);
   const normalParticipantOrderRef = useRef(
     initialParticipants.map((participant) => participant.id),
@@ -274,6 +288,8 @@ export function LuckyPlayerHome({
         : "DRAW PLAYER";
   const privateMode = mode.kind === "private";
   const canOperatePrivateDraw = !privateMode || mode.canOperate !== false;
+  const playerControlsLocked =
+    spinning || savingPlayers || savingWinnerRemoval;
   const showSetupControls =
     (!privateMode || canOperatePrivateDraw) && !liveMode;
   const showLiveControls = (privateMode && canOperatePrivateDraw) || liveMode;
@@ -569,8 +585,7 @@ export function LuckyPlayerHome({
 
     if (
       !canOperatePrivateDraw ||
-      spinning ||
-      savingPlayers ||
+      playerControlsLocked ||
       !mode.drawId ||
       !mode.drawMode
     ) {
@@ -709,7 +724,7 @@ export function LuckyPlayerHome({
   }
 
   function shuffleParticipants() {
-    if (spinning || participants.length < 2) {
+    if (playerControlsLocked || participants.length < 2) {
       return;
     }
 
@@ -729,7 +744,7 @@ export function LuckyPlayerHome({
   }
 
   function resetShuffleCount() {
-    if (spinning) {
+    if (playerControlsLocked) {
       return;
     }
 
@@ -821,7 +836,7 @@ export function LuckyPlayerHome({
   }
 
   async function drawPlayer() {
-    if (spinning || savingPlayers || spinInFlightRef.current) {
+    if (playerControlsLocked || spinInFlightRef.current) {
       return;
     }
 
@@ -913,7 +928,7 @@ export function LuckyPlayerHome({
             setResult(nextResult);
             setRecentWinners((current) => [nextResult, ...current].slice(0, 8));
             resetPlayerShuffleForNextDraw(
-              privateMode && mode.removeWinnerAfterWin
+              privateMode && removeWinnerAfterWin
                 ? (data.participantId ?? undefined)
                 : undefined,
             );
@@ -932,7 +947,7 @@ export function LuckyPlayerHome({
   }
 
   function startLiveDraw() {
-    if (spinning || savingPlayers || spinInFlightRef.current) {
+    if (playerControlsLocked || spinInFlightRef.current) {
       return;
     }
 
@@ -943,6 +958,55 @@ export function LuckyPlayerHome({
 
     setLiveMode(true);
     void drawPlayer();
+  }
+
+  async function updateWinnerRemoval(nextValue: boolean) {
+    if (
+      !privateMode ||
+      !canOperatePrivateDraw ||
+      playerControlsLocked ||
+      winnerRemovalSaveInFlightRef.current ||
+      liveMode ||
+      !mode.drawId ||
+      !mode.drawMode
+    ) {
+      return;
+    }
+
+    winnerRemovalSaveInFlightRef.current = true;
+    setSavingWinnerRemoval(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/admin/player-draws/${mode.drawId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "set-remove-winner-after-win",
+          removeWinnerAfterWin: nextValue,
+        }),
+      });
+      const data = (await response.json()) as PlayerDrawSettingsResponse;
+
+      if (
+        !response.ok ||
+        typeof data.draw?.removeWinnerAfterWin !== "boolean" ||
+        !data.draw.participants ||
+        !data.draw.updatedAt
+      ) {
+        setMessage("Unable to update winner removal setting.");
+        return;
+      }
+
+      setRemoveWinnerAfterWin(data.draw.removeWinnerAfterWin);
+      setParticipants(data.draw.participants);
+      setParticipantRevision(data.draw.updatedAt);
+      setShuffleCount(0);
+    } catch {
+      setMessage("Unable to update winner removal setting.");
+    } finally {
+      winnerRemovalSaveInFlightRef.current = false;
+      setSavingWinnerRemoval(false);
+    }
   }
 
   async function shareResult() {
@@ -965,12 +1029,12 @@ export function LuckyPlayerHome({
   }
 
   const statusCopy = useMemo(() => {
-    if (privateMode && mode.removeWinnerAfterWin) {
+    if (privateMode && removeWinnerAfterWin) {
       return "Previous winners are removed from subsequent draws.";
     }
 
     return "Shuffle changes the displayed order only.";
-  }, [mode, privateMode]);
+  }, [privateMode, removeWinnerAfterWin]);
 
   return (
     <main className="premium-shell min-h-screen">
@@ -1027,7 +1091,7 @@ export function LuckyPlayerHome({
                     value={manualText}
                     onChange={(event) => setManualText(event.target.value)}
                     placeholder="Paste one player per line"
-                    disabled={spinning || savingPlayers}
+                    disabled={playerControlsLocked}
                   />
                 </label>
                 <div className="flex flex-wrap gap-3">
@@ -1035,14 +1099,14 @@ export function LuckyPlayerHome({
                     className="gold-button focus-ring min-h-12 rounded-xl px-5 py-3 text-sm uppercase tracking-[0.14em] disabled:opacity-60"
                     type="button"
                     onClick={() => void loadManualNames()}
-                    disabled={spinning || savingPlayers}
+                    disabled={playerControlsLocked}
                   >
                     USE NAMES
                   </button>
                   <button
                     className="focus-ring flex min-h-12 items-center gap-2 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black text-white hover:bg-white/12 disabled:opacity-60"
                     type="button"
-                    disabled={spinning || savingPlayers || participants.length < 2}
+                    disabled={playerControlsLocked || participants.length < 2}
                     onClick={shuffleParticipants}
                     aria-label={`Shuffle participants, count ${shuffleCount}`}
                   >
@@ -1052,7 +1116,7 @@ export function LuckyPlayerHome({
                   <button
                     className="focus-ring min-h-12 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-xs font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
                     type="button"
-                    disabled={spinning || savingPlayers || shuffleCount === 0}
+                    disabled={playerControlsLocked || shuffleCount === 0}
                     onClick={resetShuffleCount}
                     aria-label="Reset shuffle count"
                   >
@@ -1062,8 +1126,7 @@ export function LuckyPlayerHome({
                     className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black text-white hover:bg-white/12 disabled:opacity-60"
                     type="button"
                     disabled={
-                      spinning ||
-                      savingPlayers ||
+                      playerControlsLocked ||
                       (participants.length === 0 &&
                         !manualText.trim() &&
                         !newName.trim() &&
@@ -1091,7 +1154,7 @@ export function LuckyPlayerHome({
                       <button
                         className="focus-ring rounded-lg bg-white/10 px-3 py-2 font-bold text-white"
                         type="button"
-                        disabled={spinning || savingPlayers}
+                        disabled={playerControlsLocked}
                         onClick={() => {
                           const nextParticipants =
                             removeDuplicateNames(visibleParticipants);
@@ -1119,13 +1182,13 @@ export function LuckyPlayerHome({
                     value={newName}
                     onChange={(event) => setNewName(event.target.value)}
                     placeholder="Add player name"
-                    disabled={spinning || savingPlayers}
+                    disabled={playerControlsLocked}
                   />
                   <button
                     className="focus-ring grid h-12 min-w-12 place-items-center rounded-lg border border-white/12 bg-white/8 px-4 text-white hover:bg-white/12 disabled:opacity-50"
                     type="button"
                     onClick={() => void addParticipant()}
-                    disabled={spinning || savingPlayers}
+                    disabled={playerControlsLocked}
                     aria-label="Add participant"
                   >
                     <Plus className="size-4" />
@@ -1138,7 +1201,7 @@ export function LuckyPlayerHome({
                       value={newReference}
                       onChange={(event) => setNewReference(event.target.value)}
                       placeholder="Reference (optional)"
-                      disabled={spinning || savingPlayers}
+                      disabled={playerControlsLocked}
                     />
                     <label
                       className={`focus-ring flex min-h-11 items-center justify-center gap-2 rounded-lg border border-white/12 bg-white/8 px-4 py-2 text-sm font-black text-white hover:bg-white/12 ${spinning ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}
@@ -1149,7 +1212,7 @@ export function LuckyPlayerHome({
                         className="sr-only"
                         type="file"
                         accept=".csv,text/csv"
-                        disabled={spinning || savingPlayers}
+                        disabled={playerControlsLocked}
                         onChange={(event) =>
                           void importCsv(event.target.files?.[0] ?? null)
                         }
@@ -1160,7 +1223,7 @@ export function LuckyPlayerHome({
                   <button
                     className="focus-ring w-fit rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-[#aeb7ca] hover:bg-white/[0.08] hover:text-white"
                     type="button"
-                    disabled={spinning || savingPlayers}
+                    disabled={playerControlsLocked}
                     onClick={() => setShowMoreOptions(true)}
                   >
                     MORE OPTIONS
@@ -1174,7 +1237,7 @@ export function LuckyPlayerHome({
                 <button
                   className="gold-button focus-ring min-h-12 rounded-xl px-6 py-4 text-sm uppercase tracking-[0.16em] disabled:opacity-60"
                   type="button"
-                  disabled={spinning || savingPlayers || eligibleCount === 0}
+                  disabled={playerControlsLocked || eligibleCount === 0}
                   onClick={startLiveDraw}
                 >
                   LIVE DRAW
@@ -1182,12 +1245,35 @@ export function LuckyPlayerHome({
               </div>
             ) : null}
 
+            {privateMode && canOperatePrivateDraw ? (
+              <label className="mt-4 flex w-fit items-start gap-3 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-[#dfe6f6]">
+                <input
+                  className="mt-0.5 size-4 accent-[#f6d98f]"
+                  type="checkbox"
+                  aria-label="Remove winner after win"
+                  checked={removeWinnerAfterWin}
+                  disabled={playerControlsLocked || liveMode}
+                  onChange={(event) =>
+                    void updateWinnerRemoval(event.target.checked)
+                  }
+                />
+                <span>
+                  <span className="block font-black uppercase tracking-[0.12em] text-white">
+                    Remove winner after win
+                  </span>
+                  <span className="mt-1 block text-xs leading-5 text-[#aeb7ca]">
+                    Winner stays in history but cannot win again.
+                  </span>
+                </span>
+              </label>
+            ) : null}
+
             {showLiveControls ? (
               <div className="mt-5 flex flex-wrap items-center gap-3">
                 <button
                   className="gold-button focus-ring min-h-12 rounded-xl px-7 py-4 text-sm uppercase tracking-[0.18em] disabled:opacity-60"
                   type="button"
-                  disabled={spinning || savingPlayers || eligibleCount === 0}
+                  disabled={playerControlsLocked || eligibleCount === 0}
                   onClick={drawPlayer}
                 >
                   {spinning ? "DRAWING" : drawButtonLabel}
@@ -1195,7 +1281,7 @@ export function LuckyPlayerHome({
                 <button
                   className="event-action focus-ring flex min-h-12 items-center gap-2 rounded-xl px-4 py-3 text-sm font-black text-white disabled:opacity-60"
                   type="button"
-                  disabled={spinning || savingPlayers || participants.length < 2}
+                  disabled={playerControlsLocked || participants.length < 2}
                   onClick={shuffleParticipants}
                   aria-label={`Shuffle participants, count ${shuffleCount}`}
                 >
@@ -1205,7 +1291,7 @@ export function LuckyPlayerHome({
                 <button
                   className="event-action focus-ring min-h-12 rounded-xl px-4 py-3 text-xs font-black uppercase tracking-[0.12em] text-white disabled:opacity-60"
                   type="button"
-                  disabled={spinning || savingPlayers || shuffleCount === 0}
+                  disabled={playerControlsLocked || shuffleCount === 0}
                   onClick={resetShuffleCount}
                   aria-label="Reset shuffle count"
                 >
@@ -1418,12 +1504,22 @@ export function LuckyPlayerHome({
                                   Reference: {presentationParticipant.reference}
                                 </p>
                               ) : null}
+                              {privateMode &&
+                              canOperatePrivateDraw &&
+                              !participant.isEligible ? (
+                                <p
+                                  className="mt-1 text-xs font-black uppercase tracking-[0.12em] text-[#f6d98f]"
+                                  aria-label={`${participant.displayName} eligibility`}
+                                >
+                                  Ineligible
+                                </p>
+                              ) : null}
                             </div>
                             {showSetupControls ? (
                               <button
                                 className="focus-ring grid size-9 place-items-center rounded-lg border border-white/10 text-[#aeb7ca] hover:text-white"
                                 type="button"
-                                disabled={spinning || savingPlayers}
+                                disabled={playerControlsLocked}
                                 onClick={() => {
                                   const nextParticipants = participants.filter(
                                     (item) => item.id !== participant.id,

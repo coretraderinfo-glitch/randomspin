@@ -110,6 +110,14 @@ function participantRequest(body: unknown) {
   });
 }
 
+function playerDrawPatchRequest(body: unknown) {
+  return new NextRequest("http://localhost:3000/api/admin/player-draws/player-draw-1", {
+    method: "PATCH",
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json", origin: "http://localhost:3000" },
+  });
+}
+
 function adminPayload(overrides: Record<string, unknown> = {}) {
   return {
     name: baseDraw.name,
@@ -235,6 +243,21 @@ describe("RandomSpin Player Draw APIs", () => {
     expect(mocks.playerDrawUpdate).not.toHaveBeenCalled();
   });
 
+  it("requires an authenticated admin for the winner-removal action", async () => {
+    mocks.getAdminFromRequest.mockResolvedValue(null);
+    const { PATCH } = await import("@/app/api/admin/player-draws/[id]/route");
+    const response = await PATCH(
+      playerDrawPatchRequest({
+        action: "set-remove-winner-after-win",
+        removeWinnerAfterWin: true,
+      }),
+      { params: Promise.resolve({ id: "player-draw-1" }) },
+    );
+
+    expect(response.status).toBe(401);
+    expect(mocks.playerDrawUpdate).not.toHaveBeenCalled();
+  });
+
   it("rejects legacy participant payloads on settings updates", async () => {
     const { PUT } = await import("@/app/api/admin/player-draws/[id]/route");
     const response = await PUT(adminRequest(adminPayload({
@@ -294,6 +317,81 @@ describe("RandomSpin Player Draw APIs", () => {
     expect(liveDraw.participants).toEqual(liveParticipants);
     expect(liveDraw.participants.find((participant) => participant.id === "participant-david")?.isEligible).toBe(false);
     expect(liveDraw.participants.find((participant) => participant.id === "participant-walk-in")).toBeDefined();
+  });
+
+  it("changes only winner removal when a stale live page toggles the setting", async () => {
+    const producerState = {
+      ...baseDraw,
+      name: "Renamed by producer",
+      mode: "OPERATOR",
+      pendingOperatorParticipantId: "participant-sarah",
+      showParticipantList: false,
+      showReferencesPublicly: false,
+      participants: participants.map((participant) => ({ ...participant })),
+    };
+    mocks.playerDrawFindUnique
+      .mockResolvedValueOnce(producerState)
+      .mockResolvedValueOnce({ ...producerState, removeWinnerAfterWin: true });
+    const { PATCH } = await import("@/app/api/admin/player-draws/[id]/route");
+
+    const response = await PATCH(
+      playerDrawPatchRequest({
+        action: "set-remove-winner-after-win",
+        removeWinnerAfterWin: true,
+      }),
+      { params: Promise.resolve({ id: "player-draw-1" }) },
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(mocks.playerDrawUpdate).toHaveBeenCalledWith({
+      where: { id: "player-draw-1" },
+      data: { removeWinnerAfterWin: true },
+    });
+    expect(body.draw).toEqual(expect.objectContaining({
+      name: "Renamed by producer",
+      mode: "OPERATOR",
+      pendingOperatorParticipantId: "participant-sarah",
+      showParticipantList: false,
+      showReferencesPublicly: false,
+      removeWinnerAfterWin: true,
+    }));
+    expect(body.draw.participants).toEqual(
+      JSON.parse(JSON.stringify(producerState.participants)),
+    );
+    expect(mocks.playerParticipantUpdate).not.toHaveBeenCalled();
+    expect(mocks.playerParticipantDeleteMany).not.toHaveBeenCalled();
+    expect(mocks.playerParticipantCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects unrelated fields on the winner-removal action", async () => {
+    const { PATCH } = await import("@/app/api/admin/player-draws/[id]/route");
+    const response = await PATCH(
+      playerDrawPatchRequest({
+        action: "set-remove-winner-after-win",
+        removeWinnerAfterWin: true,
+        mode: "RANDOM",
+      }),
+      { params: Promise.resolve({ id: "player-draw-1" }) },
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.playerDrawUpdate).not.toHaveBeenCalled();
+  });
+
+  it("does not reactivate an inactive draw through the winner-removal action", async () => {
+    mocks.playerDrawFindUnique.mockResolvedValue({ ...baseDraw, isActive: false });
+    const { PATCH } = await import("@/app/api/admin/player-draws/[id]/route");
+    const response = await PATCH(
+      playerDrawPatchRequest({
+        action: "set-remove-winner-after-win",
+        removeWinnerAfterWin: true,
+      }),
+      { params: Promise.resolve({ id: "player-draw-1" }) },
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.playerDrawUpdate).not.toHaveBeenCalled();
   });
 
   it("requires an authenticated admin for participant-only changes", async () => {

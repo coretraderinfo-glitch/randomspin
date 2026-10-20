@@ -343,6 +343,107 @@ describe("admin feedback banners", () => {
     expect(JSON.stringify(payload)).not.toContain("isEligible");
   });
 
+  it("refreshes the authoritative participant snapshot without changing draw settings", async () => {
+    const refreshedParticipants = [
+      { id: "ali", displayName: "Ali", reference: "001", isEligible: false },
+      { id: "sarah", displayName: "Sarah", reference: "002", isEligible: true },
+      { id: "walk-in", displayName: "Walk-in", reference: null, isEligible: true },
+    ];
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        draw: {
+          ...playerControlDraw,
+          participants: refreshedParticipants,
+          updatedAt: "2026-08-22T08:01:00.000Z",
+          pendingOperatorParticipantId: "ali",
+          mode: "RANDOM",
+        },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <PlayerDrawControlForm
+        draw={{ ...playerControlDraw, pendingOperatorParticipantId: "sarah" }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "REFRESH PARTICIPANTS" }));
+
+    await waitFor(() => expect(screen.getByDisplayValue("Walk-in")).toBeInTheDocument());
+    expect(screen.getByText("3 total · 2 eligible")).toBeInTheDocument();
+    expect(screen.getByLabelText("Ali eligibility")).toHaveTextContent("Ineligible");
+    expect(screen.getByText("Pending: Sarah - 002")).toBeInTheDocument();
+    expect(screen.getAllByRole("combobox")[0]).toHaveValue("OPERATOR");
+    expect(fetchMock).toHaveBeenCalledWith("/api/admin/player-draws/player-draw-1");
+
+    fireEvent.change(screen.getByDisplayValue("Ali"), {
+      target: { value: "Ali refreshed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "SAVE PARTICIPANTS" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const payload = JSON.parse(
+      String((fetchMock.mock.calls[1]?.[1] as RequestInit).body),
+    ) as { revision: string };
+    expect(payload.revision).toBe("2026-08-22T08:01:00.000Z");
+  });
+
+  it("protects unsaved participant edits before refreshing", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        draw: {
+          ...playerControlDraw,
+          participants: [{ id: "server", displayName: "Server participant", reference: null, isEligible: true }],
+          updatedAt: "2026-08-22T08:01:00.000Z",
+        },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+
+    render(<PlayerDrawControlForm draw={playerControlDraw} />);
+    fireEvent.change(screen.getByDisplayValue("Ali"), {
+      target: { value: "Unsaved Ali" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "REFRESH PARTICIPANTS" }));
+
+    expect(confirm).toHaveBeenCalledWith(
+      "You have unsaved participant changes. Refreshing will discard them.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue("Unsaved Ali")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "REFRESH PARTICIPANTS" }));
+    await waitFor(() => expect(screen.getByDisplayValue("Server participant")).toBeInTheDocument());
+    expect(screen.queryByText("Save participant changes before updating draw settings.")).not.toBeInTheDocument();
+  });
+
+  it("blocks duplicate participant refreshes while the read is pending", async () => {
+    let resolveRefresh: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn().mockReturnValue(
+      new Promise<Response>((resolve) => {
+        resolveRefresh = resolve;
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PlayerDrawControlForm draw={playerControlDraw} />);
+    const refreshButton = screen.getByRole("button", { name: "REFRESH PARTICIPANTS" });
+    fireEvent.click(refreshButton);
+    fireEvent.click(refreshButton);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "REFRESHING..." })).toBeDisabled();
+
+    resolveRefresh?.(
+      new Response(JSON.stringify({ draw: { ...playerControlDraw, updatedAt: "2026-08-22T08:01:00.000Z" } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await waitFor(() => expect(screen.getByText("Participants refreshed.")).toBeInTheDocument());
+  });
+
   it("resyncs participants and revision after setting the next winner before a participant save", async () => {
     const synchronizedParticipants = [
       ...playerControlDraw.participants,
