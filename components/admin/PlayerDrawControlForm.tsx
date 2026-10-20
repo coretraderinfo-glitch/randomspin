@@ -21,13 +21,20 @@ type PlayerDrawState = {
   removeWinnerAfterWin: boolean;
   showParticipantList: boolean;
   showReferencesPublicly: boolean;
+  revision: string;
   participants: Participant[];
 };
 
 type DrawResponse = {
   message?: string;
   error?: string;
-  draw?: Partial<PlayerDrawState>;
+  draw?: Partial<PlayerDrawState> & { updatedAt?: string };
+};
+
+type ParticipantResponse = {
+  error?: string;
+  participants?: Participant[];
+  revision?: string | null;
 };
 
 function createLocalId() {
@@ -83,6 +90,8 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savingParticipants, setSavingParticipants] = useState(false);
+  const [participantDirty, setParticipantDirty] = useState(false);
   const [savingAction, setSavingAction] = useState<"save" | "set" | "clear" | null>(null);
 
   useEffect(() => {
@@ -94,6 +103,7 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
     return () => window.clearTimeout(timer);
   }, [message]);
   const eligibleParticipants = state.participants.filter((participant) => participant.isEligible);
+  const isBusy = saving || savingParticipants;
   const filteredParticipants = state.participants
     .filter((participant) => `${participant.displayName} ${participant.reference ?? ""}`.toLowerCase().includes(query.toLowerCase()))
     .slice(0, 240);
@@ -110,6 +120,11 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
   }
 
   async function save(action: "save" | "set" | "clear" = "save") {
+    if (participantDirty) {
+      setError("Save participant changes before updating draw settings.");
+      return;
+    }
+
     setSaving(true);
     setSavingAction(action);
     setMessage(null);
@@ -125,7 +140,6 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
         removeWinnerAfterWin: state.removeWinnerAfterWin,
         showParticipantList: state.showParticipantList,
         showReferencesPublicly: state.showReferencesPublicly,
-        participants: state.participants,
         nextWinnerParticipantId: action === "set" ? nextWinnerParticipantId : undefined,
         action
       })
@@ -142,7 +156,21 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
 
     setState((current) => ({
       ...current,
-      ...data.draw,
+      name: data.draw?.name ?? current.name,
+      mode: data.draw?.mode ?? current.mode,
+      isActive: data.draw?.isActive ?? current.isActive,
+      removeWinnerAfterWin:
+        data.draw?.removeWinnerAfterWin ?? current.removeWinnerAfterWin,
+      showParticipantList:
+        data.draw?.showParticipantList ?? current.showParticipantList,
+      showReferencesPublicly:
+        data.draw?.showReferencesPublicly ?? current.showReferencesPublicly,
+      ...(data.draw?.updatedAt && data.draw.participants
+        ? {
+            participants: data.draw.participants,
+            revision: data.draw.updatedAt,
+          }
+        : {}),
       pendingOperatorParticipantId:
         action === "clear" ? null : action === "set" ? nextWinnerParticipantId : data.draw?.pendingOperatorParticipantId ?? current.pendingOperatorParticipantId
     }));
@@ -150,6 +178,55 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
       setNextWinnerParticipantId("");
     }
     setMessage(action === "set" ? "Next winner set successfully." : action === "clear" ? "Next winner cleared." : normalizeFeedbackMessage(data.message, "Player draw settings saved."));
+  }
+
+  async function saveParticipants() {
+    setSavingParticipants(true);
+    setMessage(null);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/admin/player-draws/${state.id}/participants`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          revision: state.revision,
+          participants: state.participants.map(({ id, displayName, reference }) => ({
+            id,
+            displayName,
+            reference,
+          })),
+        }),
+      });
+      const data = (await response.json()) as ParticipantResponse;
+
+      if (response.status === 409 && data.participants && data.revision) {
+        setState((current) => ({
+          ...current,
+          participants: data.participants ?? current.participants,
+          revision: data.revision ?? current.revision,
+        }));
+        setParticipantDirty(false);
+        setError("Player list changed on another device. Review the refreshed list and try again.");
+        return;
+      }
+      if (!response.ok || !data.participants || !data.revision) {
+        setError(data.error ?? "Participants could not be saved.");
+        return;
+      }
+
+      setState((current) => ({
+        ...current,
+        participants: data.participants ?? current.participants,
+        revision: data.revision ?? current.revision,
+      }));
+      setParticipantDirty(false);
+      setMessage("Participants saved.");
+    } catch {
+      setError("Participants could not be saved.");
+    } finally {
+      setSavingParticipants(false);
+    }
   }
 
   function addPastedParticipants() {
@@ -160,6 +237,7 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
     }
 
     setState((current) => ({ ...current, participants: [...current.participants, ...parsed].slice(0, 1000) }));
+    setParticipantDirty(true);
     setPasteText("");
     setError(null);
     setMessage(`${parsed.length} participants added.`);
@@ -170,6 +248,7 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
       ...current,
       participants: current.participants.map((participant) => (participant.id === id ? { ...participant, ...patch } : participant))
     }));
+    setParticipantDirty(true);
   }
 
   return (
@@ -195,18 +274,18 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
         <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <label>
             <span className="mb-2 block text-xs font-black uppercase tracking-[0.18em] text-[#aeb7ca]">Draw Name</span>
-            <input className="focus-ring h-12 w-full rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white" value={state.name} onChange={(event) => setState((current) => ({ ...current, name: event.target.value }))} />
+            <input className="focus-ring h-12 w-full rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white" value={state.name} disabled={isBusy} onChange={(event) => setState((current) => ({ ...current, name: event.target.value }))} />
           </label>
           <label>
             <span className="mb-2 block text-xs font-black uppercase tracking-[0.18em] text-[#aeb7ca]">Mode</span>
-            <select className="focus-ring h-12 w-full rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white" value={state.mode} onChange={(event) => setState((current) => ({ ...current, mode: event.target.value as "RANDOM" | "OPERATOR" }))}>
+            <select className="focus-ring h-12 w-full rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white" value={state.mode} disabled={isBusy} onChange={(event) => setState((current) => ({ ...current, mode: event.target.value as "RANDOM" | "OPERATOR" }))}>
               <option value="RANDOM">Random</option>
               <option value="OPERATOR">Operator Winner</option>
             </select>
           </label>
           <label>
             <span className="mb-2 block text-xs font-black uppercase tracking-[0.18em] text-[#aeb7ca]">Status</span>
-            <select className="focus-ring h-12 w-full rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white" value={state.isActive ? "true" : "false"} onChange={(event) => setState((current) => ({ ...current, isActive: event.target.value === "true" }))}>
+            <select className="focus-ring h-12 w-full rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white" value={state.isActive ? "true" : "false"} disabled={isBusy} onChange={(event) => setState((current) => ({ ...current, isActive: event.target.value === "true" }))}>
               <option value="true">Active</option>
               <option value="false">Inactive</option>
             </select>
@@ -223,6 +302,7 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
               <input
                 type="checkbox"
                 checked={Boolean(state[key as keyof PlayerDrawState])}
+                disabled={isBusy}
                 onChange={(event) => setState((current) => ({ ...current, [key]: event.target.checked }))}
               />
               {label}
@@ -234,7 +314,7 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
           <div className="mt-5 rounded-lg border border-[rgba(246,217,143,0.18)] bg-[rgba(246,217,143,0.06)] p-4">
             <p className="text-xs font-black uppercase tracking-[0.22em] text-[#f6d98f]">Next Winner</p>
             <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto_auto]">
-              <select className="focus-ring h-12 rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white" value={nextWinnerParticipantId} onChange={(event) => setNextWinnerParticipantId(event.target.value)}>
+              <select className="focus-ring h-12 rounded-lg border border-white/10 bg-white/[0.06] px-4 text-white" value={nextWinnerParticipantId} disabled={isBusy} onChange={(event) => setNextWinnerParticipantId(event.target.value)}>
                 <option value="">Choose eligible participant</option>
                 {eligibleParticipants.map((participant) => (
                   <option key={participant.id} value={participant.id}>
@@ -242,10 +322,10 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
                   </option>
                 ))}
               </select>
-              <button className="gold-button focus-ring rounded-lg px-5 py-3 text-sm uppercase tracking-[0.14em] disabled:opacity-60" type="button" disabled={saving || !nextWinnerParticipantId} onClick={() => void save("set")}>
+              <button className="gold-button focus-ring rounded-lg px-5 py-3 text-sm uppercase tracking-[0.14em] disabled:opacity-60" type="button" disabled={isBusy || participantDirty || !nextWinnerParticipantId} onClick={() => void save("set")}>
                 {savingAction === "set" ? "Setting..." : "SET NEXT WINNER"}
               </button>
-              <button className="focus-ring rounded-lg border border-white/12 bg-white/8 px-5 py-3 text-sm font-black text-white hover:bg-white/12 disabled:opacity-60" type="button" disabled={saving} onClick={() => void save("clear")}>
+              <button className="focus-ring rounded-lg border border-white/12 bg-white/8 px-5 py-3 text-sm font-black text-white hover:bg-white/12 disabled:opacity-60" type="button" disabled={isBusy || participantDirty} onClick={() => void save("clear")}>
                 {savingAction === "clear" ? "Clearing..." : "CLEAR"}
               </button>
             </div>
@@ -255,12 +335,13 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
           </div>
         ) : null}
 
-        <button className="gold-button focus-ring mt-5 flex items-center gap-2 rounded-lg px-5 py-3 text-sm uppercase tracking-[0.14em] disabled:opacity-60" type="button" disabled={saving} onClick={() => void save("save")}>
+        <button className="gold-button focus-ring mt-5 flex items-center gap-2 rounded-lg px-5 py-3 text-sm uppercase tracking-[0.14em] disabled:opacity-60" type="button" disabled={isBusy || participantDirty} onClick={() => void save("save")}>
           <Save className="size-4" />
           {savingAction === "save" ? "Saving..." : "SAVE SETTINGS"}
         </button>
         {error ? <p className="danger-banner mt-4 rounded-lg px-4 py-3 text-sm font-semibold">{error}</p> : null}
         <SuccessBanner message={message} />
+        {participantDirty ? <p className="mt-3 text-sm text-[#f6d98f]">Save participant changes before updating draw settings.</p> : null}
       </section>
 
       <section className="glass rounded-xl p-5">
@@ -276,9 +357,12 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
         </div>
 
         <div className="grid gap-3">
-          <textarea className="focus-ring min-h-24 rounded-lg border border-white/10 bg-white/[0.06] px-4 py-3 text-white" value={pasteText} onChange={(event) => setPasteText(event.target.value)} placeholder="Paste names or Name,Reference CSV rows" />
-          <button className="focus-ring w-fit rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black text-white hover:bg-white/12" type="button" onClick={addPastedParticipants}>
+          <textarea className="focus-ring min-h-24 rounded-lg border border-white/10 bg-white/[0.06] px-4 py-3 text-white" value={pasteText} disabled={isBusy} onChange={(event) => setPasteText(event.target.value)} placeholder="Paste names or Name,Reference CSV rows" />
+          <button className="focus-ring w-fit rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black text-white hover:bg-white/12 disabled:opacity-60" type="button" disabled={isBusy} onClick={addPastedParticipants}>
             Add Pasted Participants
+          </button>
+          <button className="gold-button focus-ring w-fit rounded-lg px-4 py-3 text-sm uppercase tracking-[0.14em] disabled:opacity-60" type="button" disabled={isBusy} onClick={() => void saveParticipants()}>
+            {savingParticipants ? "Saving Participants..." : "SAVE PARTICIPANTS"}
           </button>
         </div>
 
@@ -292,17 +376,19 @@ export function PlayerDrawControlForm({ draw }: { draw: PlayerDrawState }) {
                   <span className="mb-1 block text-[0.68rem] font-black uppercase tracking-[0.14em] text-[#8f9bb4]">
                     Name{detail ? <span className="ml-2 normal-case tracking-normal text-[#dfe6f6]">· {detail}</span> : null}
                   </span>
-                  <input className="focus-ring h-10 w-full rounded-lg border border-white/10 bg-white/[0.06] px-3 text-white" value={participant.displayName} onChange={(event) => updateParticipant(participant.id, { displayName: event.target.value })} />
+                  <input className="focus-ring h-10 w-full rounded-lg border border-white/10 bg-white/[0.06] px-3 text-white" value={participant.displayName} disabled={isBusy} onChange={(event) => updateParticipant(participant.id, { displayName: event.target.value })} />
                 </label>
                 <label>
                   <span className="mb-1 block text-[0.68rem] font-black uppercase tracking-[0.14em] text-[#8f9bb4]">Reference</span>
-                  <input className="focus-ring h-10 w-full rounded-lg border border-white/10 bg-white/[0.06] px-3 text-white" value={participant.reference ?? ""} onChange={(event) => updateParticipant(participant.id, { reference: event.target.value || null })} placeholder="Reference" />
+                  <input className="focus-ring h-10 w-full rounded-lg border border-white/10 bg-white/[0.06] px-3 text-white" value={participant.reference ?? ""} disabled={isBusy} onChange={(event) => updateParticipant(participant.id, { reference: event.target.value || null })} placeholder="Reference" />
                 </label>
-                <label className="flex items-center gap-2 px-2 text-sm font-bold text-white md:pt-5">
-                  <input type="checkbox" checked={participant.isEligible} onChange={(event) => updateParticipant(participant.id, { isEligible: event.target.checked })} />
-                  Eligible
-                </label>
-                <button className="danger-control focus-ring grid size-10 place-items-center rounded-lg border md:mt-5" type="button" onClick={() => setState((current) => ({ ...current, participants: current.participants.filter((item) => item.id !== participant.id) }))} aria-label={`Remove ${participant.displayName}`}>
+                <p className="px-2 text-sm font-bold text-white md:pt-5" aria-label={`${participant.displayName} eligibility`}>
+                  {participant.isEligible ? "Eligible" : "Ineligible"}
+                </p>
+                <button className="danger-control focus-ring grid size-10 place-items-center rounded-lg border md:mt-5 disabled:opacity-60" type="button" disabled={isBusy} onClick={() => {
+                  setState((current) => ({ ...current, participants: current.participants.filter((item) => item.id !== participant.id) }));
+                  setParticipantDirty(true);
+                }} aria-label={`Remove ${participant.displayName}`}>
                   <Trash2 className="size-4" />
                 </button>
               </div>

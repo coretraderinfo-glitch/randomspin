@@ -77,7 +77,17 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    return NextResponse.json({ draw, message: "Player draw created successfully." }, { status: 201 });
+    return NextResponse.json(
+      {
+        draw: {
+          ...draw,
+          participantCount: parsed.data.participants.length,
+          eligibleCount: parsed.data.participants.filter((participant) => participant.isEligible !== false).length
+        },
+        message: "Player draw created successfully."
+      },
+      { status: 201 }
+    );
   } catch (error) {
     if (error instanceof SpinValidationError) {
       return jsonError(error.message, 400);

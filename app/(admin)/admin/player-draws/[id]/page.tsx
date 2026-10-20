@@ -29,6 +29,7 @@ export default async function AdminPlayerDrawPage({ params }: { params: Promise<
             removeWinnerAfterWin: draw.removeWinnerAfterWin,
             showParticipantList: draw.showParticipantList,
             showReferencesPublicly: draw.showReferencesPublicly,
+            revision: draw.updatedAt.toISOString(),
             participants: draw.participants.map((participant) => ({
               id: participant.id,
               displayName: participant.displayName,

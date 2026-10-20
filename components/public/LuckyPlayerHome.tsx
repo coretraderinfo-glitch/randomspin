@@ -42,6 +42,10 @@ export type LuckyPlayerMode =
       showParticipantList: boolean;
       showRecentWinners?: boolean;
       canOperate?: boolean;
+      drawId?: string;
+      drawMode?: "RANDOM" | "OPERATOR";
+      showReferencesPublicly?: boolean;
+      revision?: string;
     };
 
 type PlayerSpinResponse = PlayerWinnerResult & {
@@ -222,6 +226,8 @@ export function LuckyPlayerHome({
   const [newName, setNewName] = useState("");
   const [newReference, setNewReference] = useState("");
   const [showMoreOptions, setShowMoreOptions] = useState(false);
+  const [showPrivateParticipantEditor, setShowPrivateParticipantEditor] =
+    useState(false);
   const [query, setQuery] = useState("");
   const [rollingName, setRollingName] = useState("READY");
   const [phase, setPhase] = useState<
@@ -229,6 +235,8 @@ export function LuckyPlayerHome({
   >("READY");
   const [countdownValue, setCountdownValue] = useState<number | null>(null);
   const [spinning, setSpinning] = useState(false);
+  const [savingPlayers, setSavingPlayers] = useState(false);
+  const [participantRevision, setParticipantRevision] = useState(mode.kind === "private" ? mode.revision ?? "" : "");
   const [hasCompletedDraw, setHasCompletedDraw] = useState(false);
   const [result, setResult] = useState<PlayerWinnerResult | null>(null);
   const [recentWinners, setRecentWinners] = useState<PlayerWinnerResult[]>([]);
@@ -266,9 +274,18 @@ export function LuckyPlayerHome({
         : "DRAW PLAYER";
   const privateMode = mode.kind === "private";
   const canOperatePrivateDraw = !privateMode || mode.canOperate !== false;
-  const showSetupControls = mode.kind === "public" && !liveMode;
+  const showSetupControls =
+    (!privateMode || canOperatePrivateDraw) && !liveMode;
   const showLiveControls = (privateMode && canOperatePrivateDraw) || liveMode;
   const showParticipantPreview = privateMode || !liveMode;
+  const participantListHiddenFromPresentation =
+    privateMode && !mode.showParticipantList;
+  const canShowPrivateParticipantEditor =
+    participantListHiddenFromPresentation &&
+    canOperatePrivateDraw &&
+    showSetupControls;
+  const showParticipantList =
+    !participantListHiddenFromPresentation || showPrivateParticipantEditor;
   const visibleParticipants = participants;
   const participantMembershipKey = getParticipantMembershipKey(participants);
   const shuffleSessionKey = getShuffleSessionKey(mode);
@@ -287,12 +304,14 @@ export function LuckyPlayerHome({
         .includes(query.toLowerCase()),
     )
     .slice(0, 120);
-  const participantCount = privateMode
-    ? mode.participantCount
-    : visibleParticipants.length;
-  const eligibleCount = privateMode
-    ? mode.eligibleCount
-    : eligibleParticipants.length;
+  const participantCount =
+    privateMode && !canOperatePrivateDraw
+      ? mode.participantCount
+      : visibleParticipants.length;
+  const eligibleCount =
+    privateMode && !canOperatePrivateDraw
+      ? mode.eligibleCount
+      : eligibleParticipants.length;
   const showRecentWinners =
     (mode.kind === "public" || mode.showRecentWinners === true) &&
     (showLiveControls || recentWinners.length > 0);
@@ -319,9 +338,7 @@ export function LuckyPlayerHome({
   }, [participantMembershipKey, shuffleCount, shuffleSessionKey]);
 
   useEffect(() => {
-    if (
-      previousParticipantMembershipRef.current === participantMembershipKey
-    ) {
+    if (previousParticipantMembershipRef.current === participantMembershipKey) {
       return;
     }
 
@@ -434,7 +451,9 @@ export function LuckyPlayerHome({
 
   function placeholderName() {
     const source =
-      visibleParticipants.length > 0
+      privateMode && !mode.showParticipantList
+        ? [{ displayName: `PLAYER ${((cursorRef.current += 1) % 9) + 1}`, reference: null }]
+        : visibleParticipants.length > 0
         ? visibleParticipants
         : [{ displayName: "PLAYER", reference: null }];
     cursorRef.current = (cursorRef.current + 1) % source.length;
@@ -442,7 +461,7 @@ export function LuckyPlayerHome({
   }
 
   function getFinishingNames(winnerName: string, stepCount: number) {
-    const candidates = visibleParticipants
+    const candidates = (privateMode && !mode.showParticipantList ? [] : visibleParticipants)
       .map((participant) => participant.displayName)
       .filter(
         (name) => name.trim().toLowerCase() !== winnerName.trim().toLowerCase(),
@@ -540,13 +559,90 @@ export function LuckyPlayerHome({
     timerRef.current = window.setTimeout(tick, delays[0]);
   }
 
-  function loadManualNames() {
+  async function persistPrivateParticipants(
+    nextParticipants: PlayerParticipantView[],
+  ) {
+    if (!privateMode) {
+      setParticipants(nextParticipants);
+      return true;
+    }
+
+    if (
+      !canOperatePrivateDraw ||
+      spinning ||
+      savingPlayers ||
+      !mode.drawId ||
+      !mode.drawMode
+    ) {
+      return false;
+    }
+
+    setSavingPlayers(true);
     try {
-      setParticipants(parseLines(manualText));
+      const canonicalParticipants = [...nextParticipants].sort((left, right) => {
+        const leftIndex = normalParticipantOrderRef.current.indexOf(left.id);
+        const rightIndex = normalParticipantOrderRef.current.indexOf(right.id);
+        return (leftIndex < 0 ? Number.MAX_SAFE_INTEGER : leftIndex) - (rightIndex < 0 ? Number.MAX_SAFE_INTEGER : rightIndex);
+      });
+      const response = await fetch(`/api/admin/player-draws/${mode.drawId}/participants`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          revision: participantRevision,
+          participants: canonicalParticipants.map(({ id, displayName, reference }) => ({ id, displayName, reference }))
+        }),
+      });
+      const data = (await response.json()) as {
+        error?: string;
+        participants?: PlayerParticipantView[];
+        revision?: string | null;
+      };
+
+      if (response.status === 409) {
+        if (data.participants && data.revision) {
+          setParticipants(data.participants);
+          setParticipantRevision(data.revision);
+          setShuffleCount(0);
+        }
+        setMessage("Player list changed on another device. Refresh and try again.");
+        return false;
+      }
+
+      if (!response.ok || !data.participants || !data.revision) {
+        setMessage("Unable to update players.");
+        return false;
+      }
+
+      setParticipants(data.participants);
+      setParticipantRevision(data.revision);
       setShuffleCount(0);
-      setQuery("");
-      setConfirmClearAll(false);
-      setMessage(null);
+      return true;
+    } catch {
+      setMessage("Unable to update players.");
+      return false;
+    } finally {
+      setSavingPlayers(false);
+    }
+  }
+
+  async function loadManualNames() {
+    try {
+      const nextParticipants = parseLines(manualText);
+      if (!privateMode) {
+        setParticipants(nextParticipants);
+        setShuffleCount(0);
+        setQuery("");
+        setConfirmClearAll(false);
+        setMessage(null);
+        return;
+      }
+      const saved = await persistPrivateParticipants(nextParticipants);
+      if (saved) {
+        setShuffleCount(0);
+        setQuery("");
+        setConfirmClearAll(false);
+        setMessage(null);
+      }
     } catch {
       setMessage("Could not read those names.");
     }
@@ -562,32 +658,54 @@ export function LuckyPlayerHome({
       return;
     }
 
-    setParticipants(parseCsv(await file.text()));
-    setShuffleCount(0);
-    setQuery("");
-    setConfirmClearAll(false);
-    setMessage(null);
+    const nextParticipants = parseCsv(await file.text());
+    if (!privateMode) {
+      setParticipants(nextParticipants);
+      setShuffleCount(0);
+      setQuery("");
+      setConfirmClearAll(false);
+      setMessage(null);
+      return;
+    }
+    const saved = await persistPrivateParticipants(nextParticipants);
+    if (saved) {
+      setShuffleCount(0);
+      setQuery("");
+      setConfirmClearAll(false);
+      setMessage(null);
+    }
   }
 
-  function addParticipant() {
+  async function addParticipant() {
     const displayName = cleanText(newName);
     if (!displayName) {
       return;
     }
 
-    setParticipants((current) => [
-      ...current,
+    const nextParticipants = [
+      ...participants,
       {
         id: createLocalId(),
         displayName,
         reference: cleanText(newReference, 80) || null,
         isEligible: true,
       },
-    ]);
-    setShuffleCount(0);
-    setNewName("");
-    setNewReference("");
-    setConfirmClearAll(false);
+    ];
+    if (!privateMode) {
+      setParticipants(nextParticipants);
+      setShuffleCount(0);
+      setNewName("");
+      setNewReference("");
+      setConfirmClearAll(false);
+      return;
+    }
+    const saved = await persistPrivateParticipants(nextParticipants);
+    if (saved) {
+      setShuffleCount(0);
+      setNewName("");
+      setNewReference("");
+      setConfirmClearAll(false);
+    }
   }
 
   function shuffleParticipants() {
@@ -622,7 +740,15 @@ export function LuckyPlayerHome({
     setShuffleCount(0);
     setParticipants((current) => {
       const currentParticipants = removedParticipantId
-        ? current.filter((participant) => participant.id !== removedParticipantId)
+        ? privateMode
+          ? current.map((participant) =>
+              participant.id === removedParticipantId
+                ? { ...participant, isEligible: false }
+                : participant,
+            )
+          : current.filter(
+              (participant) => participant.id !== removedParticipantId,
+            )
         : current;
       const participantById = new Map(
         currentParticipants.map((participant) => [participant.id, participant]),
@@ -650,7 +776,7 @@ export function LuckyPlayerHome({
     });
   }
 
-  function clearAllPlayers() {
+  async function clearAllPlayers() {
     if (!confirmClearAll) {
       setConfirmClearAll(true);
       setMessage(null);
@@ -669,19 +795,33 @@ export function LuckyPlayerHome({
       clearAllTimerRef.current = null;
     }
 
-    setParticipants([]);
-    setShuffleCount(0);
-    setManualText("");
-    setNewName("");
-    setNewReference("");
-    setShowMoreOptions(false);
-    setQuery("");
-    setConfirmClearAll(false);
-    setMessage(null);
+    if (!privateMode) {
+      setParticipants([]);
+      setShuffleCount(0);
+      setManualText("");
+      setNewName("");
+      setNewReference("");
+      setShowMoreOptions(false);
+      setQuery("");
+      setConfirmClearAll(false);
+      setMessage(null);
+      return;
+    }
+    const saved = await persistPrivateParticipants([]);
+    if (saved) {
+      setShuffleCount(0);
+      setManualText("");
+      setNewName("");
+      setNewReference("");
+      setShowMoreOptions(false);
+      setQuery("");
+      setConfirmClearAll(false);
+      setMessage(null);
+    }
   }
 
   async function drawPlayer() {
-    if (spinning || spinInFlightRef.current) {
+    if (spinning || savingPlayers || spinInFlightRef.current) {
       return;
     }
 
@@ -747,7 +887,10 @@ export function LuckyPlayerHome({
           spinId: data.spinId,
           participantId: data.participantId,
           displayName: data.displayName,
-          reference: data.reference,
+          reference:
+            privateMode && !mode.showReferencesPublicly
+              ? null
+              : data.reference,
           timestamp: data.timestamp,
         };
 
@@ -789,7 +932,7 @@ export function LuckyPlayerHome({
   }
 
   function startLiveDraw() {
-    if (spinning || spinInFlightRef.current) {
+    if (spinning || savingPlayers || spinInFlightRef.current) {
       return;
     }
 
@@ -884,22 +1027,22 @@ export function LuckyPlayerHome({
                     value={manualText}
                     onChange={(event) => setManualText(event.target.value)}
                     placeholder="Paste one player per line"
-                    disabled={spinning}
+                    disabled={spinning || savingPlayers}
                   />
                 </label>
                 <div className="flex flex-wrap gap-3">
                   <button
                     className="gold-button focus-ring min-h-12 rounded-xl px-5 py-3 text-sm uppercase tracking-[0.14em] disabled:opacity-60"
                     type="button"
-                    onClick={loadManualNames}
-                    disabled={spinning}
+                    onClick={() => void loadManualNames()}
+                    disabled={spinning || savingPlayers}
                   >
                     USE NAMES
                   </button>
                   <button
                     className="focus-ring flex min-h-12 items-center gap-2 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black text-white hover:bg-white/12 disabled:opacity-60"
                     type="button"
-                    disabled={spinning || participants.length < 2}
+                    disabled={spinning || savingPlayers || participants.length < 2}
                     onClick={shuffleParticipants}
                     aria-label={`Shuffle participants, count ${shuffleCount}`}
                   >
@@ -909,7 +1052,7 @@ export function LuckyPlayerHome({
                   <button
                     className="focus-ring min-h-12 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-xs font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
                     type="button"
-                    disabled={spinning || shuffleCount === 0}
+                    disabled={spinning || savingPlayers || shuffleCount === 0}
                     onClick={resetShuffleCount}
                     aria-label="Reset shuffle count"
                   >
@@ -920,13 +1063,14 @@ export function LuckyPlayerHome({
                     type="button"
                     disabled={
                       spinning ||
+                      savingPlayers ||
                       (participants.length === 0 &&
                         !manualText.trim() &&
                         !newName.trim() &&
                         !newReference.trim() &&
                         !query.trim())
                     }
-                    onClick={clearAllPlayers}
+                    onClick={() => void clearAllPlayers()}
                   >
                     {confirmClearAll ? "CONFIRM CLEAR" : "CLEAR LIST"}
                   </button>
@@ -947,11 +1091,16 @@ export function LuckyPlayerHome({
                       <button
                         className="focus-ring rounded-lg bg-white/10 px-3 py-2 font-bold text-white"
                         type="button"
+                        disabled={spinning || savingPlayers}
                         onClick={() => {
-                          setParticipants(
-                            removeDuplicateNames(visibleParticipants),
-                          );
-                          setShuffleCount(0);
+                          const nextParticipants =
+                            removeDuplicateNames(visibleParticipants);
+                          if (!privateMode) {
+                            setParticipants(nextParticipants);
+                            setShuffleCount(0);
+                            return;
+                          }
+                          void persistPrivateParticipants(nextParticipants);
                         }}
                       >
                         Remove duplicates
@@ -970,13 +1119,13 @@ export function LuckyPlayerHome({
                     value={newName}
                     onChange={(event) => setNewName(event.target.value)}
                     placeholder="Add player name"
-                    disabled={spinning}
+                    disabled={spinning || savingPlayers}
                   />
                   <button
                     className="focus-ring grid h-12 min-w-12 place-items-center rounded-lg border border-white/12 bg-white/8 px-4 text-white hover:bg-white/12 disabled:opacity-50"
                     type="button"
-                    onClick={addParticipant}
-                    disabled={spinning}
+                    onClick={() => void addParticipant()}
+                    disabled={spinning || savingPlayers}
                     aria-label="Add participant"
                   >
                     <Plus className="size-4" />
@@ -989,7 +1138,7 @@ export function LuckyPlayerHome({
                       value={newReference}
                       onChange={(event) => setNewReference(event.target.value)}
                       placeholder="Reference (optional)"
-                      disabled={spinning}
+                      disabled={spinning || savingPlayers}
                     />
                     <label
                       className={`focus-ring flex min-h-11 items-center justify-center gap-2 rounded-lg border border-white/12 bg-white/8 px-4 py-2 text-sm font-black text-white hover:bg-white/12 ${spinning ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}
@@ -1000,7 +1149,7 @@ export function LuckyPlayerHome({
                         className="sr-only"
                         type="file"
                         accept=".csv,text/csv"
-                        disabled={spinning}
+                        disabled={spinning || savingPlayers}
                         onChange={(event) =>
                           void importCsv(event.target.files?.[0] ?? null)
                         }
@@ -1011,7 +1160,7 @@ export function LuckyPlayerHome({
                   <button
                     className="focus-ring w-fit rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-[#aeb7ca] hover:bg-white/[0.08] hover:text-white"
                     type="button"
-                    disabled={spinning}
+                    disabled={spinning || savingPlayers}
                     onClick={() => setShowMoreOptions(true)}
                   >
                     MORE OPTIONS
@@ -1025,7 +1174,7 @@ export function LuckyPlayerHome({
                 <button
                   className="gold-button focus-ring min-h-12 rounded-xl px-6 py-4 text-sm uppercase tracking-[0.16em] disabled:opacity-60"
                   type="button"
-                  disabled={spinning || eligibleCount === 0}
+                  disabled={spinning || savingPlayers || eligibleCount === 0}
                   onClick={startLiveDraw}
                 >
                   LIVE DRAW
@@ -1038,7 +1187,7 @@ export function LuckyPlayerHome({
                 <button
                   className="gold-button focus-ring min-h-12 rounded-xl px-7 py-4 text-sm uppercase tracking-[0.18em] disabled:opacity-60"
                   type="button"
-                  disabled={spinning || eligibleCount === 0}
+                  disabled={spinning || savingPlayers || eligibleCount === 0}
                   onClick={drawPlayer}
                 >
                   {spinning ? "DRAWING" : drawButtonLabel}
@@ -1046,7 +1195,7 @@ export function LuckyPlayerHome({
                 <button
                   className="event-action focus-ring flex min-h-12 items-center gap-2 rounded-xl px-4 py-3 text-sm font-black text-white disabled:opacity-60"
                   type="button"
-                  disabled={spinning || participants.length < 2}
+                  disabled={spinning || savingPlayers || participants.length < 2}
                   onClick={shuffleParticipants}
                   aria-label={`Shuffle participants, count ${shuffleCount}`}
                 >
@@ -1056,7 +1205,7 @@ export function LuckyPlayerHome({
                 <button
                   className="event-action focus-ring min-h-12 rounded-xl px-4 py-3 text-xs font-black uppercase tracking-[0.12em] text-white disabled:opacity-60"
                   type="button"
-                  disabled={spinning || shuffleCount === 0}
+                  disabled={spinning || savingPlayers || shuffleCount === 0}
                   onClick={resetShuffleCount}
                   aria-label="Reset shuffle count"
                 >
@@ -1212,11 +1361,27 @@ export function LuckyPlayerHome({
                     />
                   </label>
                 </div>
-                {privateMode && !mode.showParticipantList ? (
-                  <p className="mt-4 text-sm text-[#aeb7ca]">
-                    Participant list is hidden for this event.
-                  </p>
-                ) : (
+                {participantListHiddenFromPresentation ? (
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <p className="text-sm text-[#aeb7ca]">
+                      Participant list is hidden for this event.
+                    </p>
+                    {canShowPrivateParticipantEditor ? (
+                      <button
+                        className="focus-ring rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-[#aeb7ca] hover:bg-white/[0.08] hover:text-white"
+                        type="button"
+                        onClick={() =>
+                          setShowPrivateParticipantEditor((value) => !value)
+                        }
+                      >
+                        {showPrivateParticipantEditor
+                          ? "HIDE PRIVATE EDITOR"
+                          : "OPEN PRIVATE EDITOR"}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+                {showParticipantList ? (
                   <div className="mt-4 grid max-h-72 gap-2 overflow-auto pr-1">
                     {filteredParticipants.length === 0 ? (
                       <p className="text-sm text-[#aeb7ca]">
@@ -1224,8 +1389,13 @@ export function LuckyPlayerHome({
                       </p>
                     ) : (
                       filteredParticipants.map((participant) => {
+                        const presentationParticipant = privateMode &&
+                          !mode.showReferencesPublicly &&
+                          !showPrivateParticipantEditor
+                          ? { ...participant, reference: null }
+                          : participant;
                         const detail = participantDisplayDetail(
-                          participant,
+                          presentationParticipant,
                           duplicateOrdinals,
                         );
 
@@ -1243,9 +1413,9 @@ export function LuckyPlayerHome({
                                   </span>
                                 ) : null}
                               </p>
-                              {participant.reference ? (
+                              {presentationParticipant.reference ? (
                                 <p className="text-xs text-[#8f9bb4]">
-                                  Reference: {participant.reference}
+                                  Reference: {presentationParticipant.reference}
                                 </p>
                               ) : null}
                             </div>
@@ -1253,13 +1423,19 @@ export function LuckyPlayerHome({
                               <button
                                 className="focus-ring grid size-9 place-items-center rounded-lg border border-white/10 text-[#aeb7ca] hover:text-white"
                                 type="button"
+                                disabled={spinning || savingPlayers}
                                 onClick={() => {
-                                  setParticipants((current) =>
-                                    current.filter(
-                                      (item) => item.id !== participant.id,
-                                    ),
+                                  const nextParticipants = participants.filter(
+                                    (item) => item.id !== participant.id,
                                   );
-                                  setShuffleCount(0);
+                                  if (!privateMode) {
+                                    setParticipants(nextParticipants);
+                                    setShuffleCount(0);
+                                    return;
+                                  }
+                                  void persistPrivateParticipants(
+                                    nextParticipants,
+                                  );
                                 }}
                                 aria-label={`Remove ${participant.displayName}`}
                               >
@@ -1276,7 +1452,7 @@ export function LuckyPlayerHome({
                       })
                     )}
                   </div>
-                )}
+                ) : null}
               </section>
             ) : null}
           </motion.div>

@@ -8,7 +8,8 @@ export const PLAYER_DRAW_RANDOM_MODE = "RANDOM";
 export const PLAYER_DRAW_OPERATOR_MODE = "OPERATOR";
 export const PLAYER_DRAW_MAX_PARTICIPANTS = 1000;
 
-export type PlayerDrawMode = typeof PLAYER_DRAW_RANDOM_MODE | typeof PLAYER_DRAW_OPERATOR_MODE;
+export type PlayerDrawMode =
+  typeof PLAYER_DRAW_RANDOM_MODE | typeof PLAYER_DRAW_OPERATOR_MODE;
 
 export type PlayerParticipantInput = {
   id?: string;
@@ -36,6 +37,11 @@ export type PlayerDrawMutationInput = {
   clearPendingWinner?: boolean;
 };
 
+export type PlayerDrawSettingsInput = Omit<
+  PlayerDrawMutationInput,
+  "participants"
+>;
+
 export class PlayerDrawNotFoundError extends Error {
   constructor() {
     super("Player draw not found.");
@@ -50,6 +56,13 @@ export class PlayerDrawStateError extends Error {
   }
 }
 
+export class PlayerDrawConflictError extends Error {
+  constructor() {
+    super("Player list changed on another device. Refresh and try again.");
+    this.name = "PlayerDrawConflictError";
+  }
+}
+
 const publicCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 function sanitizeText(value: unknown, maxLength: number) {
@@ -61,11 +74,16 @@ function sanitizeText(value: unknown, maxLength: number) {
 }
 
 function isUniqueConstraintError(error: unknown) {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2002"
+  );
 }
 
 export function isPlayerDrawMode(value: unknown): value is PlayerDrawMode {
-  return value === PLAYER_DRAW_RANDOM_MODE || value === PLAYER_DRAW_OPERATOR_MODE;
+  return (
+    value === PLAYER_DRAW_RANDOM_MODE || value === PLAYER_DRAW_OPERATOR_MODE
+  );
 }
 
 export function getPlayerDrawAudienceLabel(mode: string) {
@@ -88,7 +106,9 @@ export function normalizePlayerParticipants(input: PlayerParticipantInput[]) {
   }
 
   if (input.length > PLAYER_DRAW_MAX_PARTICIPANTS) {
-    throw new SpinValidationError(`Use ${PLAYER_DRAW_MAX_PARTICIPANTS} participants or fewer.`);
+    throw new SpinValidationError(
+      `Use ${PLAYER_DRAW_MAX_PARTICIPANTS} participants or fewer.`,
+    );
   }
 
   const participants = input
@@ -96,18 +116,16 @@ export function normalizePlayerParticipants(input: PlayerParticipantInput[]) {
       id: participant.id ? sanitizeText(participant.id, 80) : undefined,
       displayName: sanitizeText(participant.displayName, 120),
       reference: sanitizeText(participant.reference, 80) || null,
-      isEligible: participant.isEligible !== false
+      isEligible: participant.isEligible !== false,
     }))
     .filter((participant) => participant.displayName.length > 0);
-
-  if (participants.length === 0) {
-    throw new SpinValidationError("Add at least one participant.");
-  }
 
   return participants;
 }
 
-export function detectDuplicateNames(participants: Array<{ displayName: string }>) {
+export function detectDuplicateNames(
+  participants: Array<{ displayName: string }>,
+) {
   const seen = new Set<string>();
   let duplicates = 0;
 
@@ -175,7 +193,9 @@ export function parseParticipantCsv(text: string) {
     throw new SpinValidationError("CSV file is too large.");
   }
 
-  const rows = parseCsvRows(text).filter((row) => row.some((cell) => sanitizeText(cell, 120)));
+  const rows = parseCsvRows(text).filter((row) =>
+    row.some((cell) => sanitizeText(cell, 120)),
+  );
   const [firstRow] = rows;
   const hasHeader = firstRow?.[0]?.trim().toLowerCase() === "name";
   const dataRows = hasHeader ? rows.slice(1) : rows;
@@ -184,8 +204,8 @@ export function parseParticipantCsv(text: string) {
     dataRows.map((row) => ({
       displayName: row[0] ?? "",
       reference: row[1] ?? null,
-      isEligible: true
-    }))
+      isEligible: true,
+    })),
   );
 }
 
@@ -194,8 +214,8 @@ export function parseParticipantLines(text: string) {
     text.split(/\r?\n/).map((line) => ({
       displayName: line,
       reference: null,
-      isEligible: true
-    }))
+      isEligible: true,
+    })),
   );
 }
 
@@ -205,12 +225,28 @@ export function escapeCsvCell(value: string | null | undefined) {
   return `"${safe.replace(/"/g, '""')}"`;
 }
 
-export function exportParticipantsCsv(participants: Array<{ displayName: string; reference: string | null; isEligible: boolean }>) {
-  const rows = [["Name", "Reference", "Eligible"].map((value) => escapeCsvCell(value)).join(",")];
+export function exportParticipantsCsv(
+  participants: Array<{
+    displayName: string;
+    reference: string | null;
+    isEligible: boolean;
+  }>,
+) {
+  const rows = [
+    ["Name", "Reference", "Eligible"]
+      .map((value) => escapeCsvCell(value))
+      .join(","),
+  ];
 
   for (const participant of participants) {
     rows.push(
-      [participant.displayName, participant.reference, participant.isEligible ? "YES" : "NO"].map((value) => escapeCsvCell(value)).join(",")
+      [
+        participant.displayName,
+        participant.reference,
+        participant.isEligible ? "YES" : "NO",
+      ]
+        .map((value) => escapeCsvCell(value))
+        .join(","),
     );
   }
 
@@ -226,7 +262,9 @@ export function selectSecurePlayerWinner<T>(eligibleParticipants: T[]) {
 }
 
 function normalizeDrawMode(mode: string): PlayerDrawMode {
-  return mode === PLAYER_DRAW_OPERATOR_MODE ? PLAYER_DRAW_OPERATOR_MODE : PLAYER_DRAW_RANDOM_MODE;
+  return mode === PLAYER_DRAW_OPERATOR_MODE
+    ? PLAYER_DRAW_OPERATOR_MODE
+    : PLAYER_DRAW_RANDOM_MODE;
 }
 
 function assertValidMode(mode: PlayerDrawMode) {
@@ -235,10 +273,15 @@ function assertValidMode(mode: PlayerDrawMode) {
   }
 }
 
-async function createUniquePlayerPublicCode(tx: { playerDraw: Pick<typeof prisma.playerDraw, "findUnique"> } = prisma) {
+async function createUniquePlayerPublicCode(
+  tx: { playerDraw: Pick<typeof prisma.playerDraw, "findUnique"> } = prisma,
+) {
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const code = generatePlayerDrawPublicCode();
-    const existing = await tx.playerDraw.findUnique({ where: { publicCode: code }, select: { id: true } });
+    const existing = await tx.playerDraw.findUnique({
+      where: { publicCode: code },
+      select: { id: true },
+    });
 
     if (!existing) {
       return code;
@@ -249,9 +292,14 @@ async function createUniquePlayerPublicCode(tx: { playerDraw: Pick<typeof prisma
 }
 
 function participantForPublic(
-  participant: { id: string; displayName: string; reference: string | null; isEligible: boolean },
+  participant: {
+    id: string;
+    displayName: string;
+    reference: string | null;
+    isEligible: boolean;
+  },
   showReferencesPublicly = true,
-  index = 0
+  index = 0,
 ) {
   void participant.id;
 
@@ -259,7 +307,7 @@ function participantForPublic(
     id: `player-${index + 1}`,
     displayName: participant.displayName,
     reference: showReferencesPublicly ? participant.reference : null,
-    isEligible: participant.isEligible
+    isEligible: participant.isEligible,
   };
 }
 
@@ -268,8 +316,8 @@ export async function listPlayerDraws() {
     orderBy: { createdAt: "desc" },
     include: {
       participants: { select: { isEligible: true } },
-      _count: { select: { results: true } }
-    }
+      _count: { select: { results: true } },
+    },
   });
 
   return draws.map((draw) => ({
@@ -284,10 +332,12 @@ export async function listPlayerDraws() {
     showParticipantList: draw.showParticipantList,
     showReferencesPublicly: draw.showReferencesPublicly,
     participantCount: draw.participants.length,
-    eligibleCount: draw.participants.filter((participant) => participant.isEligible).length,
+    eligibleCount: draw.participants.filter(
+      (participant) => participant.isEligible,
+    ).length,
     resultCount: draw._count.results,
     createdAt: draw.createdAt,
-    updatedAt: draw.updatedAt
+    updatedAt: draw.updatedAt,
   }));
 }
 
@@ -295,15 +345,17 @@ export async function getPlayerDrawAudience(publicCode: string) {
   const draw = await prisma.playerDraw.findUnique({
     where: { publicCode },
     include: {
-      participants: { orderBy: { createdAt: "asc" } }
-    }
+      participants: { orderBy: { createdAt: "asc" } },
+    },
   });
 
   if (!draw || !draw.isActive || draw.archivedAt) {
     return null;
   }
 
-  const eligibleParticipants = draw.participants.filter((participant) => participant.isEligible);
+  const eligibleParticipants = draw.participants.filter(
+    (participant) => participant.isEligible,
+  );
 
   return {
     id: draw.id,
@@ -317,8 +369,10 @@ export async function getPlayerDrawAudience(publicCode: string) {
     showParticipantList: draw.showParticipantList,
     showReferencesPublicly: draw.showReferencesPublicly,
     participants: draw.showParticipantList
-      ? draw.participants.map((participant, index) => participantForPublic(participant, draw.showReferencesPublicly, index))
-      : []
+      ? draw.participants.map((participant, index) =>
+          participantForPublic(participant, draw.showReferencesPublicly, index),
+        )
+      : [],
   };
 }
 
@@ -329,9 +383,9 @@ export async function getPlayerDrawForAdmin(id: string) {
       participants: { orderBy: { createdAt: "asc" } },
       results: {
         orderBy: { createdAt: "desc" },
-        take: 30
-      }
-    }
+        take: 30,
+      },
+    },
   });
 
   if (!draw) {
@@ -351,8 +405,11 @@ export async function getPlayerDrawForAdmin(id: string) {
     showReferencesPublicly: draw.showReferencesPublicly,
     participants: draw.participants,
     participantCount: draw.participants.length,
-    eligibleCount: draw.participants.filter((participant) => participant.isEligible).length,
-    results: draw.results
+    eligibleCount: draw.participants.filter(
+      (participant) => participant.isEligible,
+    ).length,
+    updatedAt: draw.updatedAt,
+    results: draw.results,
   };
 }
 
@@ -377,10 +434,10 @@ export async function createPlayerDraw(input: PlayerDrawMutationInput) {
                 ...(participant.id ? { id: participant.id } : {}),
                 displayName: participant.displayName,
                 reference: participant.reference,
-                isEligible: participant.isEligible
-              }))
-            }
-          }
+                isEligible: participant.isEligible,
+              })),
+            },
+          },
         });
 
         return created;
@@ -395,17 +452,23 @@ export async function createPlayerDraw(input: PlayerDrawMutationInput) {
   throw new Error("Could not create player draw.");
 }
 
-async function validatePendingParticipant(tx: Prisma.TransactionClient, drawId: string, participantId: string | null) {
+async function validatePendingParticipant(
+  tx: Prisma.TransactionClient,
+  drawId: string,
+  participantId: string | null,
+) {
   if (participantId === null) {
     return null;
   }
 
   const participant = await tx.playerParticipant.findFirst({
-    where: { id: participantId, playerDrawId: drawId, isEligible: true }
+    where: { id: participantId, playerDrawId: drawId, isEligible: true },
   });
 
   if (!participant) {
-    throw new SpinValidationError("Next winner must be an eligible participant in this draw.");
+    throw new SpinValidationError(
+      "Next winner must be an eligible participant in this draw.",
+    );
   }
 
   return participant.id;
@@ -413,10 +476,10 @@ async function validatePendingParticipant(tx: Prisma.TransactionClient, drawId: 
 
 export async function updatePlayerDraw({
   id,
-  input
+  input,
 }: {
   id: string;
-  input: PlayerDrawMutationInput;
+  input: PlayerDrawSettingsInput;
 }) {
   assertValidMode(input.mode);
 
@@ -427,35 +490,32 @@ export async function updatePlayerDraw({
       throw new PlayerDrawNotFoundError();
     }
 
-    if (input.participants) {
-      const participants = normalizePlayerParticipants(input.participants);
-      await tx.playerDraw.update({
-        where: { id },
-        data: { pendingOperatorParticipantId: null }
-      });
-      await tx.playerParticipant.deleteMany({ where: { playerDrawId: id } });
-      await tx.playerParticipant.createMany({
-        data: participants.map((participant) => ({
-          ...(participant.id ? { id: participant.id } : {}),
-          playerDrawId: id,
-          displayName: participant.displayName,
-          reference: participant.reference,
-          isEligible: participant.isEligible
-        }))
-      });
-    }
-
-    let pendingOperatorParticipantId: string | null = existing.pendingOperatorParticipantId;
-    if (input.mode === PLAYER_DRAW_RANDOM_MODE || input.clearPendingWinner || input.nextWinnerParticipantId === null) {
+    let pendingOperatorParticipantId: string | null =
+      existing.pendingOperatorParticipantId;
+    if (
+      input.mode === PLAYER_DRAW_RANDOM_MODE ||
+      input.clearPendingWinner ||
+      input.nextWinnerParticipantId === null
+    ) {
       pendingOperatorParticipantId = null;
     } else if (input.nextWinnerParticipantId !== undefined) {
-      pendingOperatorParticipantId = await validatePendingParticipant(tx, id, input.nextWinnerParticipantId);
+      pendingOperatorParticipantId = await validatePendingParticipant(
+        tx,
+        id,
+        input.nextWinnerParticipantId,
+      );
     } else if (pendingOperatorParticipantId) {
       const stillValid = await tx.playerParticipant.findFirst({
-        where: { id: pendingOperatorParticipantId, playerDrawId: id, isEligible: true },
-        select: { id: true }
+        where: {
+          id: pendingOperatorParticipantId,
+          playerDrawId: id,
+          isEligible: true,
+        },
+        select: { id: true },
       });
-      pendingOperatorParticipantId = stillValid ? pendingOperatorParticipantId : null;
+      pendingOperatorParticipantId = stillValid
+        ? pendingOperatorParticipantId
+        : null;
     }
 
     return tx.playerDraw.update({
@@ -467,19 +527,132 @@ export async function updatePlayerDraw({
         removeWinnerAfterWin: input.removeWinnerAfterWin,
         showParticipantList: input.showParticipantList,
         showReferencesPublicly: input.showReferencesPublicly,
-        pendingOperatorParticipantId
-      }
+        pendingOperatorParticipantId,
+      },
     });
   });
 }
 
+export async function replacePlayerDrawParticipants({
+  id,
+  revision,
+  participants: submittedParticipants
+}: {
+  id: string;
+  revision: string;
+  participants: PlayerParticipantInput[];
+}) {
+  const expectedUpdatedAt = new Date(revision);
+  if (Number.isNaN(expectedUpdatedAt.getTime())) {
+    throw new PlayerDrawConflictError();
+  }
+  const participants = normalizePlayerParticipants(submittedParticipants);
+
+  return prisma.$transaction(async (tx) => {
+    const draw = await tx.playerDraw.findUnique({
+      where: { id },
+      include: { participants: { orderBy: { createdAt: "asc" } } }
+    });
+    if (!draw) {
+      throw new PlayerDrawNotFoundError();
+    }
+    if (!draw.isActive || draw.archivedAt) {
+      throw new PlayerDrawStateError("This player draw is not active.");
+    }
+    if (draw.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+      throw new PlayerDrawConflictError();
+    }
+
+    const existingById = new Map(
+      draw.participants.map((participant) => [participant.id, participant]),
+    );
+    const revisionUpdate = await tx.playerDraw.updateMany({
+      where: { id, updatedAt: expectedUpdatedAt },
+      data: { updatedAt: new Date() }
+    });
+    if (revisionUpdate.count !== 1) {
+      throw new PlayerDrawConflictError();
+    }
+
+    const retainedParticipantIds = new Set(
+      participants
+        .map((participant) => participant.id)
+        .filter((participantId): participantId is string =>
+          Boolean(participantId && existingById.has(participantId)),
+        ),
+    );
+    const removedParticipantIds = draw.participants
+      .filter((participant) => !retainedParticipantIds.has(participant.id))
+      .map((participant) => participant.id);
+
+    // Removing the armed participant would make the relation clear itself via
+    // onDelete: SetNull. Participant editing must never mutate draw settings.
+    if (
+      draw.pendingOperatorParticipantId &&
+      removedParticipantIds.includes(draw.pendingOperatorParticipantId)
+    ) {
+      throw new PlayerDrawStateError(
+        "Clear the next winner before removing that participant.",
+      );
+    }
+
+    await Promise.all(
+      participants
+        .filter(
+          (participant): participant is NormalizedPlayerParticipant & { id: string } =>
+            Boolean(participant.id && existingById.has(participant.id)),
+        )
+        .map((participant) =>
+          tx.playerParticipant.update({
+            where: { id: participant.id },
+            data: {
+              displayName: participant.displayName,
+              reference: participant.reference,
+            },
+          }),
+        ),
+    );
+    if (removedParticipantIds.length > 0) {
+      await tx.playerParticipant.deleteMany({
+        where: { id: { in: removedParticipantIds } },
+      });
+    }
+    const newParticipants = participants.filter(
+      (participant) => !participant.id || !existingById.has(participant.id),
+    );
+    if (newParticipants.length > 0) {
+      await tx.playerParticipant.createMany({
+        data: newParticipants.map((participant) => ({
+          playerDrawId: id,
+          displayName: participant.displayName,
+          reference: participant.reference,
+          // New participants always begin eligible; existing eligibility is
+          // never supplied by, or changed through, this mutation.
+          isEligible: true,
+        })),
+      });
+    }
+
+    const updated = await tx.playerDraw.findUnique({
+      where: { id },
+      include: { participants: { orderBy: { createdAt: "asc" } } }
+    });
+    if (!updated) {
+      throw new PlayerDrawNotFoundError();
+    }
+    return updated;
+  });
+}
+
 export async function createPublicPlayerSpin({
-  participants
+  participants,
 }: {
   participants: PlayerParticipantInput[];
 }) {
   const normalizedParticipants = normalizePlayerParticipants(participants);
-  const eligibleParticipants = normalizedParticipants.filter((participant) => participant.isEligible);
+  const eligibleParticipants = normalizedParticipants.filter(
+    (participant) => participant.isEligible,
+  );
   const winner = selectSecurePlayerWinner(eligibleParticipants);
 
   return {
@@ -489,14 +662,14 @@ export async function createPublicPlayerSpin({
     reference: winner.reference,
     eligibleCount: eligibleParticipants.length,
     timestamp: new Date().toISOString(),
-    mode: PLAYER_DRAW_RANDOM_MODE
+    mode: PLAYER_DRAW_RANDOM_MODE,
   };
 }
 
 export async function createPrivatePlayerDrawSpin({
   publicCode,
   hashedIp,
-  userAgent
+  userAgent,
 }: {
   publicCode: string;
   hashedIp?: string;
@@ -510,7 +683,12 @@ export async function createPrivatePlayerDrawSpin({
     }
 
     const mode = normalizeDrawMode(draw.mode);
-    let winner: { id: string; displayName: string; reference: string | null; isEligible: boolean };
+    let winner: {
+      id: string;
+      displayName: string;
+      reference: string | null;
+      isEligible: boolean;
+    };
     let eligibleCount = 0;
 
     if (mode === PLAYER_DRAW_OPERATOR_MODE) {
@@ -519,7 +697,11 @@ export async function createPrivatePlayerDrawSpin({
       }
 
       const pending = await tx.playerParticipant.findFirst({
-        where: { id: draw.pendingOperatorParticipantId, playerDrawId: draw.id, isEligible: true }
+        where: {
+          id: draw.pendingOperatorParticipantId,
+          playerDrawId: draw.id,
+          isEligible: true,
+        },
       });
 
       if (!pending) {
@@ -529,11 +711,11 @@ export async function createPrivatePlayerDrawSpin({
       const consumed = await tx.playerDraw.updateMany({
         where: {
           id: draw.id,
-          pendingOperatorParticipantId: pending.id
+          pendingOperatorParticipantId: pending.id,
         },
         data: {
-          pendingOperatorParticipantId: null
-        }
+          pendingOperatorParticipantId: null,
+        },
       });
 
       if (consumed.count !== 1) {
@@ -541,11 +723,13 @@ export async function createPrivatePlayerDrawSpin({
       }
 
       winner = pending;
-      eligibleCount = await tx.playerParticipant.count({ where: { playerDrawId: draw.id, isEligible: true } });
+      eligibleCount = await tx.playerParticipant.count({
+        where: { playerDrawId: draw.id, isEligible: true },
+      });
     } else {
       const eligible = await tx.playerParticipant.findMany({
         where: { playerDrawId: draw.id, isEligible: true },
-        orderBy: { createdAt: "asc" }
+        orderBy: { createdAt: "asc" },
       });
       winner = selectSecurePlayerWinner(eligible);
       eligibleCount = eligible.length;
@@ -557,14 +741,14 @@ export async function createPrivatePlayerDrawSpin({
         participantId: winner.id,
         displayNameSnapshot: winner.displayName,
         referenceSnapshot: winner.reference,
-        mode
-      }
+        mode,
+      },
     });
 
     if (draw.removeWinnerAfterWin) {
       await tx.playerParticipant.update({
         where: { id: winner.id },
-        data: { isEligible: false }
+        data: { isEligible: false },
       });
     }
 
@@ -578,7 +762,7 @@ export async function createPrivatePlayerDrawSpin({
       reference: draw.showReferencesPublicly ? winner.reference : null,
       eligibleCount,
       timestamp: result.createdAt.toISOString(),
-      mode
+      mode,
     };
   });
 }
@@ -595,7 +779,9 @@ export async function archivePlayerDraw(id: string) {
   }
 
   if (draw.isActive) {
-    throw new PlayerDrawStateError("Deactivate the player draw before archiving it.");
+    throw new PlayerDrawStateError(
+      "Deactivate the player draw before archiving it.",
+    );
   }
 
   return prisma.playerDraw.update({
@@ -603,8 +789,8 @@ export async function archivePlayerDraw(id: string) {
     data: {
       archivedAt: new Date(),
       isActive: false,
-      pendingOperatorParticipantId: null
-    }
+      pendingOperatorParticipantId: null,
+    },
   });
 }
 
@@ -623,8 +809,8 @@ export async function restorePlayerDraw(id: string) {
     where: { id },
     data: {
       archivedAt: null,
-      isActive: false
-    }
+      isActive: false,
+    },
   });
 }
 
@@ -636,7 +822,9 @@ export async function deletePlayerDrawPermanently(id: string) {
   }
 
   if (!draw.archivedAt) {
-    throw new PlayerDrawStateError("Archive the player draw before permanently deleting it.");
+    throw new PlayerDrawStateError(
+      "Archive the player draw before permanently deleting it.",
+    );
   }
 
   await prisma.playerDraw.delete({ where: { id } });

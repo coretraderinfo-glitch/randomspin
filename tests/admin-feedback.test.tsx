@@ -52,6 +52,7 @@ const playerControlDraw = {
   removeWinnerAfterWin: false,
   showParticipantList: true,
   showReferencesPublicly: true,
+  revision: "2026-08-22T08:00:00.000Z",
   participants: [
     { id: "ali", displayName: "Ali", reference: "001", isEligible: true },
     { id: "sarah", displayName: "Sarah", reference: "002", isEligible: true }
@@ -280,6 +281,157 @@ describe("admin feedback banners", () => {
 
     await waitFor(() => expect(screen.getByText("Player draw settings saved.")).toBeInTheDocument());
     expect(container.querySelector(".success-banner")?.textContent).toBe("Player draw settings saved.");
+  });
+
+  it("keeps participants and eligibility out of every settings action payload", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ draw: { ...playerControlDraw, updatedAt: "2026-08-22T08:01:00.000Z" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PlayerDrawControlForm draw={playerControlDraw} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "SAVE SETTINGS" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getAllByRole("combobox")[2], { target: { value: "sarah" } });
+    fireEvent.click(screen.getByRole("button", { name: "SET NEXT WINNER" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "CLEAR" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+
+    for (const [, init] of fetchMock.mock.calls) {
+      const payload = JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>;
+      expect(payload).not.toHaveProperty("participants");
+      expect(JSON.stringify(payload)).not.toContain("isEligible");
+    }
+  });
+
+  it("saves backend participant edits only through the participant endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        participants: [
+          ...playerControlDraw.participants,
+          { id: "walk-in", displayName: "Walk-in", reference: null, isEligible: true },
+        ],
+        revision: "2026-08-22T08:01:00.000Z",
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PlayerDrawControlForm draw={playerControlDraw} />);
+    fireEvent.change(screen.getByPlaceholderText("Paste names or Name,Reference CSV rows"), {
+      target: { value: "Walk-in" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add Pasted Participants" }));
+    fireEvent.click(screen.getByRole("button", { name: "SAVE PARTICIPANTS" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/player-draws/player-draw-1/participants",
+      expect.objectContaining({ method: "PUT" }),
+    );
+    const payload = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body)) as Record<string, unknown>;
+    expect(payload).toHaveProperty("revision", playerControlDraw.revision);
+    expect(JSON.stringify(payload)).not.toContain("isEligible");
+  });
+
+  it("resyncs participants and revision after setting the next winner before a participant save", async () => {
+    const synchronizedParticipants = [
+      ...playerControlDraw.participants,
+      { id: "walk-in", displayName: "Walk-in", reference: null, isEligible: true },
+    ];
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          draw: {
+            ...playerControlDraw,
+            participants: synchronizedParticipants,
+            pendingOperatorParticipantId: "sarah",
+            updatedAt: "2026-08-22T08:01:00.000Z",
+          },
+        }), { status: 200, headers: { "Content-Type": "application/json" } }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          participants: synchronizedParticipants,
+          revision: "2026-08-22T08:02:00.000Z",
+        }), { status: 200, headers: { "Content-Type": "application/json" } }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PlayerDrawControlForm draw={playerControlDraw} />);
+    fireEvent.change(screen.getAllByRole("combobox")[2], { target: { value: "sarah" } });
+    fireEvent.click(screen.getByRole("button", { name: "SET NEXT WINNER" }));
+    await waitFor(() => expect(screen.getByDisplayValue("Walk-in")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByDisplayValue("Ali"), { target: { value: "P1-renamed" } });
+    fireEvent.click(screen.getByRole("button", { name: "SAVE PARTICIPANTS" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    const payload = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as {
+      revision: string;
+      participants: Array<{ id: string; displayName: string }>;
+    };
+    expect(payload.revision).toBe("2026-08-22T08:01:00.000Z");
+    expect(payload.participants).toEqual(expect.arrayContaining([
+      { id: "ali", displayName: "P1-renamed", reference: "001" },
+      { id: "walk-in", displayName: "Walk-in", reference: null },
+    ]));
+  });
+
+  it("resyncs authoritative participants after clear next winner and save settings", async () => {
+    const synchronizedParticipants = [
+      ...playerControlDraw.participants,
+      { id: "walk-in", displayName: "Walk-in", reference: null, isEligible: true },
+    ];
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          draw: {
+            ...playerControlDraw,
+            participants: synchronizedParticipants,
+            pendingOperatorParticipantId: null,
+            updatedAt: "2026-08-22T08:01:00.000Z",
+          },
+        }), { status: 200, headers: { "Content-Type": "application/json" } }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          draw: {
+            ...playerControlDraw,
+            participants: synchronizedParticipants,
+            updatedAt: "2026-08-22T08:02:00.000Z",
+          },
+        }), { status: 200, headers: { "Content-Type": "application/json" } }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PlayerDrawControlForm draw={playerControlDraw} />);
+    fireEvent.click(screen.getByRole("button", { name: "CLEAR" }));
+    await waitFor(() => expect(screen.getByDisplayValue("Walk-in")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "SAVE SETTINGS" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByDisplayValue("Walk-in")).toBeInTheDocument();
+  });
+
+  it("blocks settings actions while participant edits are unsaved", () => {
+    render(<PlayerDrawControlForm draw={playerControlDraw} />);
+
+    fireEvent.change(screen.getByDisplayValue("Ali"), { target: { value: "Ali edited" } });
+
+    expect(screen.getByRole("button", { name: "SAVE SETTINGS" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "SET NEXT WINNER" })).toBeDisabled();
+    expect(screen.getByText("Save participant changes before updating draw settings.")).toBeInTheDocument();
   });
 
   it("wheel settings use a readable fallback instead of an empty success banner", async () => {

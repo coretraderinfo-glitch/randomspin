@@ -2,7 +2,10 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { LuckyPlayerHome } from "@/components/public/LuckyPlayerHome";
 import { getCurrentAdmin } from "@/lib/auth";
-import { getPlayerDrawAudience } from "@/lib/player-draws";
+import {
+  getPlayerDrawAudience,
+  getPlayerDrawForAdmin,
+} from "@/lib/player-draws";
 
 export const dynamic = "force-dynamic";
 
@@ -16,15 +19,33 @@ function normalizePublicCode(value: string) {
   return publicCode;
 }
 
-export default async function PlayerDrawAudiencePage({ params }: { params: Promise<{ publicCode: string }> }) {
+export default async function PlayerDrawAudiencePage({
+  params,
+}: {
+  params: Promise<{ publicCode: string }>;
+}) {
   const nonce = (await headers()).get("x-nonce") ?? undefined;
   const { publicCode: rawPublicCode } = await params;
   const publicCode = normalizePublicCode(rawPublicCode);
-  const [draw, adminSession] = await Promise.all([getPlayerDrawAudience(publicCode), getCurrentAdmin()]);
+  const [draw, adminSession] = await Promise.all([
+    getPlayerDrawAudience(publicCode),
+    getCurrentAdmin(),
+  ]);
 
   if (!draw) {
     notFound();
   }
+  const operatorDraw = adminSession
+    ? await getPlayerDrawForAdmin(draw.id)
+    : null;
+  const initialParticipants = (
+    operatorDraw?.participants ?? draw.participants
+  ).map((participant) => ({
+    id: participant.id,
+    displayName: participant.displayName,
+    reference: participant.reference,
+    isEligible: participant.isEligible,
+  }));
 
   return (
     <>
@@ -37,12 +58,12 @@ export default async function PlayerDrawAudiencePage({ params }: { params: Promi
             "@type": "WebApplication",
             name: "RandomSpin Player Draw",
             applicationCategory: "EntertainmentApplication",
-            offers: { "@type": "Offer", price: "0", priceCurrency: "USD" }
-          })
+            offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+          }),
         }}
       />
       <LuckyPlayerHome
-        initialParticipants={draw.participants}
+        initialParticipants={initialParticipants}
         mode={{
           kind: "private",
           publicCode,
@@ -53,7 +74,11 @@ export default async function PlayerDrawAudiencePage({ params }: { params: Promi
           eligibleCount: draw.eligibleCount,
           removeWinnerAfterWin: draw.removeWinnerAfterWin,
           showParticipantList: draw.showParticipantList,
-          canOperate: Boolean(adminSession)
+          canOperate: Boolean(adminSession),
+          drawId: operatorDraw?.id,
+          drawMode: operatorDraw?.mode,
+          showReferencesPublicly: operatorDraw?.showReferencesPublicly,
+          revision: operatorDraw?.updatedAt.toISOString(),
         }}
       />
     </>

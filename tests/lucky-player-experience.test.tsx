@@ -775,6 +775,329 @@ describe("RandomSpin Player Draw public experience", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("persists private operator participant replacement before updating the live list", async () => {
+    const savedParticipants = [
+      { id: "alice", displayName: "Alice", reference: null, isEligible: true },
+      { id: "ben", displayName: "Ben", reference: null, isEligible: true }
+    ];
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ participants: savedParticipants, revision: "2026-08-21T00:01:00.000Z" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <LuckyPlayerHome
+        initialParticipants={[]}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "RANDOM DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 0,
+          eligibleCount: 0,
+          removeWinnerAfterWin: false,
+          showParticipantList: true,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "RANDOM",
+          showReferencesPublicly: true,
+          revision: "2026-08-21T00:00:00.000Z"
+        }}
+      />
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("Paste one player per line"), { target: { value: "Alice\nBen" } });
+    fireEvent.click(screen.getByRole("button", { name: "USE NAMES" }));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText("2 PLAYERS READY")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/player-draws/player-draw-1/participants",
+      expect.objectContaining({ method: "PUT", body: expect.stringContaining('"participants"') })
+    );
+  });
+
+  it("locks both draw actions until a private participant save succeeds", async () => {
+    let resolveSave: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn().mockImplementation(
+      () => new Promise<Response>((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <LuckyPlayerHome
+        initialParticipants={[]}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "RANDOM DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 0,
+          eligibleCount: 0,
+          removeWinnerAfterWin: false,
+          showParticipantList: true,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "RANDOM",
+          revision: "2026-08-21T00:00:00.000Z",
+        }}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("Paste one player per line"), {
+      target: { value: "Alice\nBen" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "USE NAMES" }));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("button", { name: "LIVE DRAW" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "DRAW PLAYER" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    resolveSave?.(
+      new Response(
+        JSON.stringify({
+          participants: [
+            { id: "alice", displayName: "Alice", reference: null, isEligible: true },
+            { id: "ben", displayName: "Ben", reference: null, isEligible: true },
+          ],
+          revision: "2026-08-21T00:01:00.000Z",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("button", { name: "LIVE DRAW" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "DRAW PLAYER" })).not.toBeDisabled();
+  });
+
+  it("resyncs the authoritative participant list and reports a revision conflict", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        error: "Player list changed on another device. Refresh and try again.",
+        participants: [
+          { id: "alice", displayName: "Alice", reference: null, isEligible: true },
+          { id: "server-ben", displayName: "Ben", reference: null, isEligible: true },
+        ],
+        revision: "2026-08-21T00:01:00.000Z",
+      }), {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <LuckyPlayerHome
+        initialParticipants={[{ id: "alice", displayName: "Alice", reference: null, isEligible: true }]}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "RANDOM DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 1,
+          eligibleCount: 1,
+          removeWinnerAfterWin: false,
+          showParticipantList: true,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "RANDOM",
+          revision: "2026-08-21T00:00:00.000Z",
+        }}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("Paste one player per line"), {
+      target: { value: "Alice\nBen" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "USE NAMES" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("2 PLAYERS READY")).toBeInTheDocument();
+    expect(screen.getByText("Player list changed on another device. Refresh and try again.")).toBeInTheDocument();
+  });
+
+  it("keeps hidden-list roller frames and references private on the broadcast surface", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(successfulPlayerResponse("Ben", "ben"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <LuckyPlayerHome
+        initialParticipants={[
+          { id: "alice", displayName: "Alice", reference: "A-001", isEligible: true },
+          { id: "ben", displayName: "Ben", reference: "B-002", isEligible: true },
+        ]}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "RANDOM DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 2,
+          eligibleCount: 2,
+          removeWinnerAfterWin: false,
+          showParticipantList: false,
+          showReferencesPublicly: false,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "RANDOM",
+          revision: "2026-08-21T00:00:00.000Z",
+        }}
+      />,
+    );
+
+    expect(screen.queryByText("Alice")).not.toBeInTheDocument();
+    expect(screen.queryByText("A-001")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+    await act(async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(3500);
+    });
+
+    expect(screen.getByText("ROLLING...")).toBeInTheDocument();
+    expect(screen.queryByText("Alice")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ben")).not.toBeInTheDocument();
+    expect(screen.getByText(/PLAYER [1-9]/)).toBeInTheDocument();
+  });
+
+  it("does not put a hidden private reference into the winner modal", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(successfulPlayerResponse("Ben", "ben"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <LuckyPlayerHome
+        initialParticipants={[
+          { id: "alice", displayName: "Alice", reference: "A-001", isEligible: true },
+          { id: "ben", displayName: "Ben", reference: "B-002", isEligible: true },
+        ]}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "RANDOM DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 2,
+          eligibleCount: 2,
+          removeWinnerAfterWin: false,
+          showParticipantList: true,
+          showReferencesPublicly: false,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "RANDOM",
+          revision: "2026-08-21T00:00:00.000Z",
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+    await finishDraw();
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.queryByText("Reference: 002")).not.toBeInTheDocument();
+  });
+
+  it("keeps an authenticated operator editor separate from a hidden presentation list", () => {
+    render(
+      <LuckyPlayerHome
+        initialParticipants={[{ id: "alice", displayName: "Alice", reference: "A-001", isEligible: true }]}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "RANDOM DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 1,
+          eligibleCount: 1,
+          removeWinnerAfterWin: false,
+          showParticipantList: false,
+          showReferencesPublicly: false,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "RANDOM",
+          revision: "2026-08-21T00:00:00.000Z",
+        }}
+      />,
+    );
+
+    expect(screen.queryByText("Alice")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "OPEN PRIVATE EDITOR" }));
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.getByText("Reference: A-001")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove Alice" })).toBeInTheDocument();
+  });
+
+  it("persists canonical membership order after a presentation shuffle", async () => {
+    const privateParticipants = drawParticipants.slice(0, 3);
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          participants: privateParticipants,
+          revision: "2026-08-21T00:01:00.000Z",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <LuckyPlayerHome
+        initialParticipants={privateParticipants}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "RANDOM DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 3,
+          eligibleCount: 3,
+          removeWinnerAfterWin: false,
+          showParticipantList: true,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "RANDOM",
+          revision: "2026-08-21T00:00:00.000Z",
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Shuffle participants, count 0" })[0]);
+    fireEvent.change(screen.getByPlaceholderText("Add player name"), {
+      target: { value: "Dina" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add participant" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    randomSpy.mockRestore();
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const saved = JSON.parse(String(request.body)) as {
+      participants: Array<{ id: string }>;
+    };
+    expect(saved.participants.slice(0, 3).map((participant) => participant.id)).toEqual(
+      privateParticipants.map((participant) => participant.id),
+    );
+  });
+
   it("keeps Draw Player disabled when a private player draw has zero eligible players", () => {
     render(
       <LuckyPlayerHome

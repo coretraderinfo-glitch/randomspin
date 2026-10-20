@@ -102,6 +102,14 @@ function adminRequest(body: unknown) {
   });
 }
 
+function participantRequest(body: unknown) {
+  return new NextRequest("http://localhost:3000/api/admin/player-draws/player-draw-1/participants", {
+    method: "PUT",
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json", origin: "http://localhost:3000" }
+  });
+}
+
 function adminPayload(overrides: Record<string, unknown> = {}) {
   return {
     name: baseDraw.name,
@@ -197,6 +205,25 @@ describe("RandomSpin Player Draw APIs", () => {
     expect(mocks.playerDrawCreate).not.toHaveBeenCalled();
   });
 
+  it("admin can create an active player draw with no participants", async () => {
+    mocks.playerDrawFindUnique.mockResolvedValueOnce(null);
+    const { POST } = await import("@/app/api/admin/player-draws/route");
+    const response = await POST(
+      new NextRequest("http://localhost:3000/api/admin/player-draws", {
+        method: "POST",
+        body: JSON.stringify({ name: "Friday Player Draw", mode: "RANDOM", participants: [] }),
+        headers: { "content-type": "application/json", origin: "http://localhost:3000" }
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(body.draw).toEqual(expect.objectContaining({ participantCount: 0, eligibleCount: 0 }));
+    expect(mocks.playerDrawCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ participants: { create: [] } }) })
+    );
+  });
+
   it("admin updates require authentication and publicCode does not grant admin rights", async () => {
     mocks.getAdminFromRequest.mockResolvedValue(null);
     const { PUT } = await import("@/app/api/admin/player-draws/[id]/route");
@@ -205,6 +232,161 @@ describe("RandomSpin Player Draw APIs", () => {
     });
 
     expect(response.status).toBe(401);
+    expect(mocks.playerDrawUpdate).not.toHaveBeenCalled();
+  });
+
+  it("rejects legacy participant payloads on settings updates", async () => {
+    const { PUT } = await import("@/app/api/admin/player-draws/[id]/route");
+    const response = await PUT(adminRequest(adminPayload({
+      participants: participants.map(({ id, displayName, reference, isEligible }) => ({
+        id,
+        displayName,
+        reference,
+        isEligible,
+      })),
+    })), { params: Promise.resolve({ id: "player-draw-1" }) });
+
+    expect(response.status).toBe(400);
+    expect(mocks.playerDrawUpdate).not.toHaveBeenCalled();
+    expect(mocks.playerParticipantDeleteMany).not.toHaveBeenCalled();
+    expect(mocks.playerParticipantCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("settings and next-winner actions leave live participant membership and eligibility untouched", async () => {
+    const liveParticipants = [
+      ...participants.map((participant) => ({ ...participant })),
+      {
+        id: "participant-walk-in",
+        playerDrawId: "player-draw-1",
+        displayName: "Walk-in",
+        reference: null,
+        isEligible: true,
+        createdAt: new Date("2026-08-21T00:03:00.000Z"),
+        updatedAt: new Date("2026-08-21T00:03:00.000Z"),
+      },
+    ];
+    const liveDraw = {
+      ...baseDraw,
+      participants: liveParticipants,
+      removeWinnerAfterWin: true,
+    };
+    mocks.playerDrawFindUnique.mockResolvedValue(liveDraw);
+    const { PUT } = await import("@/app/api/admin/player-draws/[id]/route");
+
+    const setResponse = await PUT(
+      adminRequest(adminPayload({
+        mode: "OPERATOR",
+        nextWinnerParticipantId: "participant-sarah",
+        action: "set",
+      })),
+      { params: Promise.resolve({ id: "player-draw-1" }) },
+    );
+    const clearResponse = await PUT(
+      adminRequest(adminPayload({ action: "clear" })),
+      { params: Promise.resolve({ id: "player-draw-1" }) },
+    );
+
+    expect(setResponse.status).toBe(200);
+    expect(clearResponse.status).toBe(200);
+    expect(mocks.playerParticipantDeleteMany).not.toHaveBeenCalled();
+    expect(mocks.playerParticipantCreateMany).not.toHaveBeenCalled();
+    expect(mocks.playerParticipantUpdate).not.toHaveBeenCalled();
+    expect(liveDraw.participants).toEqual(liveParticipants);
+    expect(liveDraw.participants.find((participant) => participant.id === "participant-david")?.isEligible).toBe(false);
+    expect(liveDraw.participants.find((participant) => participant.id === "participant-walk-in")).toBeDefined();
+  });
+
+  it("requires an authenticated admin for participant-only changes", async () => {
+    mocks.getAdminFromRequest.mockResolvedValue(null);
+    const { PUT } = await import("@/app/api/admin/player-draws/[id]/participants/route");
+    const response = await PUT(participantRequest({
+      revision: baseDraw.updatedAt.toISOString(),
+      participants: participants.map(({ id, displayName, reference }) => ({ id, displayName, reference }))
+    }), { params: Promise.resolve({ id: "player-draw-1" }) });
+
+    expect(response.status).toBe(401);
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
+  it("only updates participant data and preserves draw settings and an armed winner", async () => {
+    const { PUT } = await import("@/app/api/admin/player-draws/[id]/participants/route");
+    const response = await PUT(participantRequest({
+      revision: baseDraw.updatedAt.toISOString(),
+      participants: participants.map(({ id, displayName, reference }) => ({ id, displayName, reference }))
+    }), { params: Promise.resolve({ id: "player-draw-1" }) });
+
+    expect(response.status).toBe(200);
+    expect(mocks.playerDrawUpdate).not.toHaveBeenCalled();
+    expect(mocks.playerDrawUpdateMany).toHaveBeenCalledWith({
+      where: { id: "player-draw-1", updatedAt: baseDraw.updatedAt },
+      data: { updatedAt: expect.any(Date) }
+    });
+    expect(mocks.playerParticipantUpdate).toHaveBeenCalledWith({
+      where: { id: "participant-sarah" },
+      data: { displayName: "Sarah", reference: "002" }
+    });
+    expect(mocks.playerParticipantDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("preserves server eligibility and rejects client eligibility or settings fields", async () => {
+    const { PUT } = await import("@/app/api/admin/player-draws/[id]/participants/route");
+    const safeResponse = await PUT(participantRequest({
+      revision: baseDraw.updatedAt.toISOString(),
+      participants: participants.map(({ id, displayName, reference }) => ({ id, displayName, reference }))
+    }), { params: Promise.resolve({ id: "player-draw-1" }) });
+
+    expect(safeResponse.status).toBe(200);
+    expect(mocks.playerParticipantUpdate).toHaveBeenCalledWith({
+      where: { id: "participant-david" },
+      data: { displayName: "David", reference: "003" }
+    });
+    expect(mocks.playerParticipantUpdate).not.toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ isEligible: expect.anything() })
+    }));
+
+    const invalidResponse = await PUT(participantRequest({
+      revision: baseDraw.updatedAt.toISOString(),
+      mode: "RANDOM",
+      participants: [{ id: "participant-david", displayName: "David", reference: "003", isEligible: true }]
+    }), { params: Promise.resolve({ id: "player-draw-1" }) });
+
+    expect(invalidResponse.status).toBe(400);
+    expect(mocks.playerDrawUpdate).not.toHaveBeenCalled();
+  });
+
+  it("rejects stale participant writes without replacing a newer list", async () => {
+    mocks.playerDrawFindUnique.mockResolvedValue({
+      ...baseDraw,
+      updatedAt: new Date("2026-08-21T00:10:00.000Z")
+    });
+    const { PUT } = await import("@/app/api/admin/player-draws/[id]/participants/route");
+    const response = await PUT(participantRequest({
+      revision: baseDraw.updatedAt.toISOString(),
+      participants: [{ id: "participant-ali", displayName: "Ali", reference: "001" }]
+    }), { params: Promise.resolve({ id: "player-draw-1" }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error).toBe("Player list changed on another device. Refresh and try again.");
+    expect(body.participants.map((participant: { id: string }) => participant.id)).toEqual(
+      participants.map((participant) => participant.id),
+    );
+    expect(body.revision).toBe("2026-08-21T00:10:00.000Z");
+    expect(mocks.playerDrawUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.playerParticipantDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("does not clear an armed winner when participant membership is edited", async () => {
+    const { PUT } = await import("@/app/api/admin/player-draws/[id]/participants/route");
+    const response = await PUT(participantRequest({
+      revision: baseDraw.updatedAt.toISOString(),
+      participants: participants
+        .filter((participant) => participant.id !== "participant-sarah")
+        .map(({ id, displayName, reference }) => ({ id, displayName, reference }))
+    }), { params: Promise.resolve({ id: "player-draw-1" }) });
+
+    expect(response.status).toBe(400);
+    expect(mocks.playerParticipantDeleteMany).not.toHaveBeenCalled();
     expect(mocks.playerDrawUpdate).not.toHaveBeenCalled();
   });
 
