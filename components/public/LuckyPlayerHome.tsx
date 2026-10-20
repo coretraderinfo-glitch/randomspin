@@ -272,6 +272,8 @@ export function LuckyPlayerHome({
   const clearAllTimerRef = useRef<number | null>(null);
   const audioRef = useRef<AudioContext | null>(null);
   const spinInFlightRef = useRef(false);
+  const playerSetupRef = useRef<HTMLDivElement | null>(null);
+  const shouldScrollToPlayerSetupRef = useRef(false);
   const winnerRemovalSaveInFlightRef = useRef(false);
   const cursorRef = useRef(0);
   const normalParticipantOrderRef = useRef(
@@ -293,6 +295,12 @@ export function LuckyPlayerHome({
   const showSetupControls =
     (!privateMode || canOperatePrivateDraw) && !liveMode;
   const showLiveControls = (privateMode && canOperatePrivateDraw) || liveMode;
+  const showPrivateResultActions =
+    privateMode &&
+    canOperatePrivateDraw &&
+    hasCompletedDraw &&
+    phase === "COMPLETE" &&
+    !playerControlsLocked;
   const showParticipantPreview = privateMode || !liveMode;
   const participantListHiddenFromPresentation =
     privateMode && !mode.showParticipantList;
@@ -331,6 +339,18 @@ export function LuckyPlayerHome({
   const showRecentWinners =
     (mode.kind === "public" || mode.showRecentWinners === true) &&
     (showLiveControls || recentWinners.length > 0);
+
+  useEffect(() => {
+    if (!shouldScrollToPlayerSetupRef.current || !showSetupControls) {
+      return;
+    }
+
+    shouldScrollToPlayerSetupRef.current = false;
+    playerSetupRef.current?.scrollIntoView?.({
+      behavior: "smooth",
+      block: "start",
+    });
+  }, [showSetupControls]);
 
   useEffect(() => {
     window.localStorage.setItem(
@@ -960,6 +980,31 @@ export function LuckyPlayerHome({
     void drawPlayer();
   }
 
+  function drawAgain() {
+    if (playerControlsLocked || eligibleCount === 0) {
+      return;
+    }
+
+    setResult(null);
+    void drawPlayer();
+  }
+
+  function editPlayers() {
+    if (!privateMode || !canOperatePrivateDraw || playerControlsLocked) {
+      return;
+    }
+
+    shouldScrollToPlayerSetupRef.current = true;
+    clearTimers();
+    setResult(null);
+    setConfetti(false);
+    setCountdownValue(null);
+    setRollingName("READY");
+    setPhase("READY");
+    setHasCompletedDraw(false);
+    setLiveMode(false);
+  }
+
   async function updateWinnerRemoval(nextValue: boolean) {
     if (
       !privateMode ||
@@ -1078,7 +1123,10 @@ export function LuckyPlayerHome({
             </p>
 
             {showSetupControls ? (
-              <div className="mt-6 grid gap-4">
+              <div
+                ref={playerSetupRef}
+                className="mt-6 grid scroll-mt-24 gap-4"
+              >
                 <p className="text-xs font-black uppercase tracking-[0.22em] text-[#f6d98f]">
                   Player Setup
                 </p>
@@ -1269,62 +1317,74 @@ export function LuckyPlayerHome({
             ) : null}
 
             {showLiveControls ? (
-              <div className="mt-5 flex flex-wrap items-center gap-3">
-                <button
-                  className="gold-button focus-ring min-h-12 rounded-xl px-7 py-4 text-sm uppercase tracking-[0.18em] disabled:opacity-60"
-                  type="button"
-                  disabled={playerControlsLocked || eligibleCount === 0}
-                  onClick={drawPlayer}
-                >
-                  {spinning ? "DRAWING" : drawButtonLabel}
-                </button>
-                <button
-                  className="event-action focus-ring flex min-h-12 items-center gap-2 rounded-xl px-4 py-3 text-sm font-black text-white disabled:opacity-60"
-                  type="button"
-                  disabled={playerControlsLocked || participants.length < 2}
-                  onClick={shuffleParticipants}
-                  aria-label={`Shuffle participants, count ${shuffleCount}`}
-                >
-                  <Shuffle className="size-4 text-[#f6d98f]" />
-                  SHUFFLE {shuffleCount}×
-                </button>
-                <button
-                  className="event-action focus-ring min-h-12 rounded-xl px-4 py-3 text-xs font-black uppercase tracking-[0.12em] text-white disabled:opacity-60"
-                  type="button"
-                  disabled={playerControlsLocked || shuffleCount === 0}
-                  onClick={resetShuffleCount}
-                  aria-label="Reset shuffle count"
-                >
-                  RESET COUNT
-                </button>
-                <button
-                  className="event-icon-action focus-ring size-12 rounded-xl text-white"
-                  onClick={() => setSoundEnabled((value) => !value)}
-                  aria-label={soundEnabled ? "Turn sound off" : "Turn sound on"}
-                >
-                  {soundEnabled ? (
-                    <Volume2 className="size-4" />
-                  ) : (
-                    <VolumeX className="size-4" />
-                  )}
-                </button>
-                <button
-                  className="event-icon-action focus-ring size-12 rounded-xl text-white"
-                  onClick={() => document.documentElement.requestFullscreen?.()}
-                  aria-label="Full screen"
-                >
-                  <Maximize2 className="size-4" />
-                </button>
-                {!privateMode ? (
+              <div className="mt-5 grid gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <button
-                    className="event-action focus-ring min-h-12 rounded-xl px-4 py-3 text-sm font-black text-white disabled:opacity-60"
+                    className="gold-button focus-ring min-h-12 rounded-xl px-7 py-4 text-sm uppercase tracking-[0.18em] disabled:opacity-60"
                     type="button"
-                    disabled={spinning}
-                    onClick={() => setLiveMode(false)}
+                    disabled={playerControlsLocked || eligibleCount === 0}
+                    onClick={drawAgain}
                   >
-                    EDIT PLAYERS
+                    {spinning ? "DRAWING" : drawButtonLabel}
                   </button>
-                ) : null}
+                  {showPrivateResultActions ? (
+                    <button
+                      className="event-action focus-ring min-h-12 rounded-xl px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-white"
+                      type="button"
+                      onClick={editPlayers}
+                    >
+                      EDIT PLAYERS
+                    </button>
+                  ) : !privateMode ? (
+                    <button
+                      className="event-action focus-ring min-h-12 rounded-xl px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-white"
+                      type="button"
+                      disabled={spinning}
+                      onClick={() => setLiveMode(false)}
+                    >
+                      EDIT PLAYERS
+                    </button>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    className="event-action focus-ring flex min-h-11 items-center gap-2 rounded-xl px-4 py-2 text-xs font-black text-white disabled:opacity-60"
+                    type="button"
+                    disabled={playerControlsLocked || participants.length < 2}
+                    onClick={shuffleParticipants}
+                    aria-label={`Shuffle participants, count ${shuffleCount}`}
+                  >
+                    <Shuffle className="size-4 text-[#f6d98f]" />
+                    SHUFFLE {shuffleCount}×
+                  </button>
+                  <button
+                    className="event-action focus-ring min-h-11 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-[0.12em] text-white disabled:opacity-60"
+                    type="button"
+                    disabled={playerControlsLocked || shuffleCount === 0}
+                    onClick={resetShuffleCount}
+                    aria-label="Reset shuffle count"
+                  >
+                    RESET COUNT
+                  </button>
+                  <button
+                    className="event-icon-action focus-ring size-12 rounded-xl text-white"
+                    onClick={() => setSoundEnabled((value) => !value)}
+                    aria-label={soundEnabled ? "Turn sound off" : "Turn sound on"}
+                  >
+                    {soundEnabled ? (
+                      <Volume2 className="size-4" />
+                    ) : (
+                      <VolumeX className="size-4" />
+                    )}
+                  </button>
+                  <button
+                    className="event-icon-action focus-ring size-12 rounded-xl text-white"
+                    onClick={() => document.documentElement.requestFullscreen?.()}
+                    aria-label="Full screen"
+                  >
+                    <Maximize2 className="size-4" />
+                  </button>
+                </div>
               </div>
             ) : null}
 
@@ -1559,6 +1619,9 @@ export function LuckyPlayerHome({
         result={result}
         onClose={() => setResult(null)}
         onShare={shareResult}
+        onDrawAgain={showPrivateResultActions ? drawAgain : undefined}
+        onEditPlayers={showPrivateResultActions ? editPlayers : undefined}
+        canDrawAgain={eligibleCount > 0 && !playerControlsLocked}
       />
     </main>
   );

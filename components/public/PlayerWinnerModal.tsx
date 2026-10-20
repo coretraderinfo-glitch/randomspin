@@ -15,11 +15,17 @@ export type PlayerWinnerResult = {
 export function PlayerWinnerModal({
   result,
   onClose,
-  onShare
+  onShare,
+  onDrawAgain,
+  onEditPlayers,
+  canDrawAgain,
 }: {
   result: PlayerWinnerResult | null;
   onClose: () => void;
   onShare: () => void;
+  onDrawAgain?: () => void;
+  onEditPlayers?: () => void;
+  canDrawAgain?: boolean;
 }) {
   if (!result) {
     return null;
@@ -74,18 +80,53 @@ export function PlayerWinnerModal({
           ))}
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <button className="gold-button focus-ring min-h-12 rounded-xl px-5 py-3 text-sm uppercase tracking-[0.14em]" onClick={onClose}>
-            Close
-          </button>
-          <button
-            className="event-action focus-ring flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-white"
-            onClick={onShare}
-          >
-            <Share2 className="size-4" />
-            Share Result
-          </button>
-        </div>
+        {onDrawAgain && onEditPlayers ? (
+          <div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                className="gold-button focus-ring min-h-12 rounded-xl px-5 py-3 text-sm uppercase tracking-[0.14em] disabled:opacity-60"
+                onClick={onDrawAgain}
+                disabled={canDrawAgain === false}
+              >
+                Draw Again
+              </button>
+              <button
+                type="button"
+                className="event-action focus-ring flex min-h-12 items-center justify-center rounded-xl px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-white"
+                onClick={onEditPlayers}
+              >
+                Edit Players
+              </button>
+            </div>
+            {canDrawAgain === false ? (
+              <p className="mt-3 text-sm font-bold text-[#f6d98f]">
+                No eligible players remaining.
+              </p>
+            ) : null}
+            <button
+              type="button"
+              className="focus-ring mt-3 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-4 text-xs font-black uppercase tracking-[0.14em] text-[#dfe6f6] hover:text-white"
+              onClick={onShare}
+            >
+              <Share2 className="size-4" />
+              Share Result
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <button className="gold-button focus-ring min-h-12 rounded-xl px-5 py-3 text-sm uppercase tracking-[0.14em]" onClick={onClose}>
+              Close
+            </button>
+            <button
+              className="event-action focus-ring flex min-h-12 items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-white"
+              onClick={onShare}
+            >
+              <Share2 className="size-4" />
+              Share Result
+            </button>
+          </div>
+        )}
       </motion.div>
     </div>
   );

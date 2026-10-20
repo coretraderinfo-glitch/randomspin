@@ -1,13 +1,25 @@
 import React from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LuckyPlayerHome } from "@/components/public/LuckyPlayerHome";
 import type { PlayerParticipantView } from "@/components/public/LuckyPlayerHome";
 
 describe("RandomSpin Player Draw public experience", () => {
+  let originalScrollIntoView: PropertyDescriptor | undefined;
+  let scrollIntoViewMock: ReturnType<typeof vi.fn>;
+
   beforeEach(() => {
     vi.useFakeTimers();
     window.sessionStorage.clear();
+    originalScrollIntoView = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollIntoView",
+    );
+    scrollIntoViewMock = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoViewMock,
+    });
     vi.stubGlobal(
       "matchMedia",
       vi.fn().mockImplementation((query: string) => ({
@@ -24,6 +36,16 @@ describe("RandomSpin Player Draw public experience", () => {
   });
 
   afterEach(() => {
+    if (originalScrollIntoView) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollIntoView",
+        originalScrollIntoView,
+      );
+    } else {
+      delete (HTMLElement.prototype as { scrollIntoView?: () => void })
+        .scrollIntoView;
+    }
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
@@ -776,6 +798,9 @@ describe("RandomSpin Player Draw public experience", () => {
     expect(
       screen.queryByRole("checkbox", { name: "Remove winner after win" }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /EDIT PLAYERS/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("reflects a persisted private winner-removal setting on a fresh render", () => {
@@ -872,6 +897,159 @@ describe("RandomSpin Player Draw public experience", () => {
     expect(screen.getByText("2 PLAYERS READY")).toBeInTheDocument();
     expect(screen.getByText("1 Eligible")).toBeInTheDocument();
     expect(screen.getByLabelText("Alice eligibility")).toHaveTextContent("Ineligible");
+  });
+
+  it("returns a private result to setup without changing its authoritative player state", async () => {
+    const privateParticipants = drawParticipants.slice(0, 2);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(successfulPlayerResponse("Alice", "player-1"))
+      .mockResolvedValueOnce(successfulPlayerResponse("Ben", "player-2"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <LuckyPlayerHome
+        initialParticipants={privateParticipants}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "RANDOM DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 2,
+          eligibleCount: 2,
+          removeWinnerAfterWin: true,
+          showParticipantList: true,
+          showRecentWinners: true,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "RANDOM",
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "LIVE DRAW" }));
+    await finishDraw();
+
+    const resultDialog = screen.getByRole("dialog");
+    expect(
+      within(resultDialog).getByRole("button", { name: /draw again/i }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      within(resultDialog).getByRole("button", { name: /edit players/i }),
+    );
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText("Player Setup")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Paste one player per line")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "LIVE DRAW" })).toBeInTheDocument();
+    expect(screen.getAllByText("Alice").length).toBeGreaterThan(1);
+    expect(screen.getByText("Ben")).toBeInTheDocument();
+    expect(screen.getByText("1 Eligible")).toBeInTheDocument();
+    expect(screen.getByLabelText("Alice eligibility")).toHaveTextContent("Ineligible");
+    expect(screen.getByText("Recent Winners")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({
+      behavior: "smooth",
+      block: "start",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "LIVE DRAW" }));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("disables private modal Draw Again at zero eligible players while preserving Edit Players recovery", async () => {
+    const privateParticipants = drawParticipants.slice(0, 2);
+    const recoveredParticipants = [
+      { ...privateParticipants[0], isEligible: false },
+      { ...privateParticipants[1], isEligible: false },
+      {
+        id: "player-3",
+        displayName: "Chloe",
+        reference: "003",
+        isEligible: true,
+      },
+    ];
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(successfulPlayerResponse("Alice", "player-1"))
+      .mockResolvedValueOnce(successfulPlayerResponse("Ben", "player-2"))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            participants: recoveredParticipants,
+            revision: "2026-08-21T00:02:00.000Z",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <LuckyPlayerHome
+        initialParticipants={privateParticipants}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "RANDOM DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 2,
+          eligibleCount: 2,
+          removeWinnerAfterWin: true,
+          showParticipantList: true,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "RANDOM",
+          revision: "2026-08-21T00:00:00.000Z",
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "LIVE DRAW" }));
+    await finishDraw();
+
+    let resultDialog = screen.getByRole("dialog");
+    const firstDrawAgain = within(resultDialog).getByRole("button", {
+      name: /draw again/i,
+    });
+    expect(firstDrawAgain).toBeEnabled();
+    fireEvent.click(firstDrawAgain);
+    await finishDraw();
+
+    resultDialog = screen.getByRole("dialog");
+    const zeroEligibleDrawAgain = within(resultDialog).getByRole("button", {
+      name: /draw again/i,
+    });
+    expect(zeroEligibleDrawAgain).toBeDisabled();
+    expect(
+      within(resultDialog).getByText("No eligible players remaining."),
+    ).toBeInTheDocument();
+    fireEvent.click(zeroEligibleDrawAgain);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(
+      within(resultDialog).getByRole("button", { name: /edit players/i }),
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText("Player Setup")).toBeInTheDocument();
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({
+      behavior: "smooth",
+      block: "start",
+    });
+    expect(screen.getByRole("button", { name: "LIVE DRAW" })).toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText("Add player name"), {
+      target: { value: "Chloe" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add participant" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(screen.getByText("1 Eligible")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "LIVE DRAW" })).toBeEnabled();
   });
 
   it("keeps the last authoritative winner-removal value when its settings save fails", async () => {
