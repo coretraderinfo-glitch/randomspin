@@ -86,8 +86,17 @@ export function isPlayerDrawMode(value: unknown): value is PlayerDrawMode {
   );
 }
 
-export function getPlayerDrawAudienceLabel(mode: string) {
-  return mode === PLAYER_DRAW_OPERATOR_MODE ? "OPERATOR DRAW" : "RANDOM DRAW";
+export function getPlayerDrawAudienceLabel(
+  mode: string,
+  hasPendingOperatorParticipant = false,
+) {
+  return mode === PLAYER_DRAW_OPERATOR_MODE && hasPendingOperatorParticipant
+    ? "OPERATOR DRAW"
+    : "RANDOM DRAW";
+}
+
+export function getPlayerDrawResultModeLabel(mode: string) {
+  return mode === PLAYER_DRAW_OPERATOR_MODE ? "Operator" : "Random";
 }
 
 export function generatePlayerDrawPublicCode() {
@@ -356,13 +365,19 @@ export async function getPlayerDrawAudience(publicCode: string) {
   const eligibleParticipants = draw.participants.filter(
     (participant) => participant.isEligible,
   );
+  const hasPendingOperatorParticipant = eligibleParticipants.some(
+    (participant) => participant.id === draw.pendingOperatorParticipantId,
+  );
 
   return {
     id: draw.id,
     publicCode: draw.publicCode,
     name: draw.name,
     mode: normalizeDrawMode(draw.mode),
-    label: getPlayerDrawAudienceLabel(draw.mode),
+    label: getPlayerDrawAudienceLabel(
+      draw.mode,
+      hasPendingOperatorParticipant,
+    ),
     participantCount: draw.participants.length,
     eligibleCount: eligibleParticipants.length,
     removeWinnerAfterWin: draw.removeWinnerAfterWin,
@@ -707,19 +722,16 @@ export async function createPrivatePlayerDrawSpin({
     }
 
     const mode = normalizeDrawMode(draw.mode);
+    let resultMode: PlayerDrawMode = PLAYER_DRAW_RANDOM_MODE;
     let winner: {
       id: string;
       displayName: string;
       reference: string | null;
       isEligible: boolean;
-    };
+    } | null = null;
     let eligibleCount = 0;
 
-    if (mode === PLAYER_DRAW_OPERATOR_MODE) {
-      if (!draw.pendingOperatorParticipantId) {
-        throw new SpinValidationError("This player draw is not ready yet.");
-      }
-
+    if (mode === PLAYER_DRAW_OPERATOR_MODE && draw.pendingOperatorParticipantId) {
       const pending = await tx.playerParticipant.findFirst({
         where: {
           id: draw.pendingOperatorParticipantId,
@@ -728,29 +740,44 @@ export async function createPrivatePlayerDrawSpin({
         },
       });
 
-      if (!pending) {
-        throw new SpinValidationError("This player draw is not ready yet.");
+      if (pending) {
+        const consumed = await tx.playerDraw.updateMany({
+          where: {
+            id: draw.id,
+            pendingOperatorParticipantId: pending.id,
+          },
+          data: {
+            pendingOperatorParticipantId: null,
+          },
+        });
+
+        if (consumed.count !== 1) {
+          throw new SpinValidationError("This player draw is not ready yet.");
+        }
+
+        winner = pending;
+        resultMode = PLAYER_DRAW_OPERATOR_MODE;
+        eligibleCount = await tx.playerParticipant.count({
+          where: { playerDrawId: draw.id, isEligible: true },
+        });
+      } else {
+        const cleared = await tx.playerDraw.updateMany({
+          where: {
+            id: draw.id,
+            pendingOperatorParticipantId: draw.pendingOperatorParticipantId,
+          },
+          data: {
+            pendingOperatorParticipantId: null,
+          },
+        });
+
+        if (cleared.count !== 1) {
+          throw new SpinValidationError("This player draw is not ready yet.");
+        }
       }
+    }
 
-      const consumed = await tx.playerDraw.updateMany({
-        where: {
-          id: draw.id,
-          pendingOperatorParticipantId: pending.id,
-        },
-        data: {
-          pendingOperatorParticipantId: null,
-        },
-      });
-
-      if (consumed.count !== 1) {
-        throw new SpinValidationError("This player draw is not ready yet.");
-      }
-
-      winner = pending;
-      eligibleCount = await tx.playerParticipant.count({
-        where: { playerDrawId: draw.id, isEligible: true },
-      });
-    } else {
+    if (!winner) {
       const eligible = await tx.playerParticipant.findMany({
         where: { playerDrawId: draw.id, isEligible: true },
         orderBy: { createdAt: "asc" },
@@ -765,7 +792,7 @@ export async function createPrivatePlayerDrawSpin({
         participantId: winner.id,
         displayNameSnapshot: winner.displayName,
         referenceSnapshot: winner.reference,
-        mode,
+        mode: resultMode,
       },
     });
 
@@ -786,7 +813,7 @@ export async function createPrivatePlayerDrawSpin({
       reference: draw.showReferencesPublicly ? winner.reference : null,
       eligibleCount,
       timestamp: result.createdAt.toISOString(),
-      mode,
+      mode: resultMode,
     };
   });
 }

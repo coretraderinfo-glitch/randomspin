@@ -2,7 +2,10 @@ import { notFound } from "next/navigation";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { PlayerDrawControlForm } from "@/components/admin/PlayerDrawControlForm";
 import { requireAdminPage } from "@/lib/admin-page";
-import { getPlayerDrawForAdmin } from "@/lib/player-draws";
+import {
+  getPlayerDrawForAdmin,
+  getPlayerDrawResultModeLabel,
+} from "@/lib/player-draws";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +53,7 @@ export default async function AdminPlayerDrawPage({ params }: { params: Promise<
                   <p className="font-bold text-white">
                     #{draw.results.length - index} {result.displayNameSnapshot}
                     {result.referenceSnapshot ? ` · Reference: ${result.referenceSnapshot}` : ""} · Mode:{" "}
-                    {result.mode === "OPERATOR" ? "Operator" : "Random"}
+                    {getPlayerDrawResultModeLabel(result.mode)}
                   </p>
                   <p className="text-[#aeb7ca]">{result.createdAt.toISOString()}</p>
                 </div>

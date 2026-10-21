@@ -48,8 +48,9 @@ export type LuckyPlayerMode =
       revision?: string;
     };
 
-type PlayerSpinResponse = PlayerWinnerResult & {
+type PlayerSpinResponse = Omit<PlayerWinnerResult, "mode"> & {
   eligibleCount: number;
+  mode?: PlayerWinnerResult["mode"];
   error?: never;
 };
 
@@ -252,6 +253,9 @@ export function LuckyPlayerHome({
   const [participantRevision, setParticipantRevision] = useState(mode.kind === "private" ? mode.revision ?? "" : "");
   const [hasCompletedDraw, setHasCompletedDraw] = useState(false);
   const [result, setResult] = useState<PlayerWinnerResult | null>(null);
+  const [completedRoundMode, setCompletedRoundMode] = useState<
+    PlayerWinnerResult["mode"] | null
+  >(null);
   const [recentWinners, setRecentWinners] = useState<PlayerWinnerResult[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
@@ -339,6 +343,10 @@ export function LuckyPlayerHome({
   const showRecentWinners =
     (mode.kind === "public" || mode.showRecentWinners === true) &&
     (showLiveControls || recentWinners.length > 0);
+  const liveBadgeLabel =
+    privateMode && completedRoundMode
+      ? `${completedRoundMode} DRAW`
+      : mode.label;
 
   useEffect(() => {
     if (!shouldScrollToPlayerSetupRef.current || !showSetupControls) {
@@ -918,7 +926,7 @@ export function LuckyPlayerHome({
 
       const wait = Math.max(0, 700 - (performance.now() - rollingStartedAt));
       timerRef.current = window.setTimeout(() => {
-        const nextResult = {
+        const nextResult: PlayerWinnerResult = {
           spinId: data.spinId,
           participantId: data.participantId,
           displayName: data.displayName,
@@ -927,6 +935,7 @@ export function LuckyPlayerHome({
               ? null
               : data.reference,
           timestamp: data.timestamp,
+          mode: data.mode === "OPERATOR" ? "OPERATOR" : "RANDOM",
         };
 
         finishRolling({
@@ -945,6 +954,7 @@ export function LuckyPlayerHome({
             spinInFlightRef.current = false;
             setHasCompletedDraw(true);
             setPhase("COMPLETE");
+            setCompletedRoundMode(nextResult.mode);
             setResult(nextResult);
             setRecentWinners((current) => [nextResult, ...current].slice(0, 8));
             resetPlayerShuffleForNextDraw(
@@ -1002,6 +1012,7 @@ export function LuckyPlayerHome({
     setRollingName("READY");
     setPhase("READY");
     setHasCompletedDraw(false);
+    setCompletedRoundMode(null);
     setLiveMode(false);
   }
 
@@ -1098,7 +1109,7 @@ export function LuckyPlayerHome({
               </p>
               {privateMode ? (
                 <span className="event-status-pill rounded-full px-3 py-1 text-[0.65rem] font-black uppercase tracking-[0.18em] text-[#dfe6f6]">
-                  {mode.label}
+                  {liveBadgeLabel}
                 </span>
               ) : null}
             </div>

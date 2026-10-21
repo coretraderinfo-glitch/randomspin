@@ -62,6 +62,7 @@ describe("RandomSpin Player Draw public experience", () => {
   function successfulPlayerResponse(
     displayName: string,
     participantId = displayName.toLowerCase(),
+    mode: "OPERATOR" | "RANDOM" = "RANDOM",
   ) {
     return new Response(
       JSON.stringify({
@@ -71,6 +72,7 @@ describe("RandomSpin Player Draw public experience", () => {
         reference: "002",
         eligibleCount: 5,
         timestamp: "2026-08-21T01:02:03.000Z",
+        mode,
       }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
@@ -1704,6 +1706,53 @@ describe("RandomSpin Player Draw public experience", () => {
     );
     expect(screen.getAllByText("WINNING PLAYER").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Sarah").length).toBeGreaterThan(0);
+  });
+
+  it("uses the returned private round mode for the completed draw badge", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        successfulPlayerResponse("Alice", "player-1", "OPERATOR"),
+      )
+      .mockResolvedValueOnce(
+        successfulPlayerResponse("Ben", "player-2", "RANDOM"),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <LuckyPlayerHome
+        initialParticipants={drawParticipants.slice(0, 2)}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "OPERATOR DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 2,
+          eligibleCount: 2,
+          removeWinnerAfterWin: false,
+          showParticipantList: true,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "OPERATOR",
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "LIVE DRAW" }));
+    await finishDraw();
+    expect(screen.getByText("OPERATOR DRAW")).toBeInTheDocument();
+    expect(screen.getByText("Operator Draw")).toBeInTheDocument();
+
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: /draw again/i,
+      }),
+    );
+    await finishDraw();
+
+    expect(screen.getByText("RANDOM DRAW")).toBeInTheDocument();
+    expect(screen.getByText("Random Draw")).toBeInTheDocument();
   });
 
   it("shows references for duplicate names when references are available", () => {

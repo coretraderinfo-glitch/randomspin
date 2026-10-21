@@ -539,6 +539,27 @@ describe("RandomSpin Player Draw APIs", () => {
     expect(JSON.stringify(draw)).not.toContain("participant-sarah");
   });
 
+  it("labels an operator audience as random when no valid pending participant is armed", async () => {
+    const {
+      getPlayerDrawAudience,
+      getPlayerDrawResultModeLabel,
+    } = await import("@/lib/player-draws");
+    mocks.playerDrawFindUnique
+      .mockResolvedValueOnce({ ...baseDraw, pendingOperatorParticipantId: null })
+      .mockResolvedValueOnce({
+        ...baseDraw,
+        pendingOperatorParticipantId: "participant-david",
+      });
+
+    const withoutPending = await getPlayerDrawAudience("PLAYTEST");
+    const withIneligiblePending = await getPlayerDrawAudience("PLAYTEST");
+
+    expect(withoutPending?.label).toBe("RANDOM DRAW");
+    expect(withIneligiblePending?.label).toBe("RANDOM DRAW");
+    expect(getPlayerDrawResultModeLabel("OPERATOR")).toBe("Operator");
+    expect(getPlayerDrawResultModeLabel("RANDOM")).toBe("Random");
+  });
+
   it("visible private participant list uses safe public IDs and allowed references", async () => {
     const { getPlayerDrawAudience } = await import("@/lib/player-draws");
     mocks.playerDrawFindUnique.mockResolvedValue(baseDraw);
@@ -571,22 +592,159 @@ describe("RandomSpin Player Draw APIs", () => {
     });
   });
 
-  it("operator participant is consumed once and not reused", async () => {
+  it("consumes an operator participant once, then records each later fallback as random", async () => {
     const { POST } = await import("@/app/api/player-draw/[publicCode]/spin/route");
     mocks.playerDrawFindUnique
       .mockResolvedValueOnce(baseDraw)
+      .mockResolvedValueOnce({ ...baseDraw, pendingOperatorParticipantId: null })
       .mockResolvedValueOnce({ ...baseDraw, pendingOperatorParticipantId: null });
+    mocks.playerParticipantFindMany
+      .mockResolvedValueOnce([participants[0]])
+      .mockResolvedValueOnce([participants[0]]);
 
     const first = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "PLAYTEST" }) });
     const second = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "PLAYTEST" }) });
+    const third = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "PLAYTEST" }) });
+    const firstBody = await first.json();
+    const secondBody = await second.json();
+    const thirdBody = await third.json();
 
     expect(first.status).toBe(200);
-    expect(second.status).toBe(400);
-    expect(mocks.playerDrawResultCreate).toHaveBeenCalledTimes(1);
+    expect(firstBody.mode).toBe("OPERATOR");
+    expect(second.status).toBe(200);
+    expect(secondBody).toEqual(expect.objectContaining({
+      participantId: "participant-ali",
+      displayName: "Ali",
+      mode: "RANDOM",
+    }));
+    expect(third.status).toBe(200);
+    expect(thirdBody.mode).toBe("RANDOM");
+    expect(mocks.playerDrawResultCreate).toHaveBeenCalledTimes(3);
     expect(mocks.playerDrawUpdateMany).toHaveBeenCalledWith({
       where: { id: "player-draw-1", pendingOperatorParticipantId: "participant-sarah" },
       data: { pendingOperatorParticipantId: null }
     });
+    expect(mocks.playerDrawUpdateMany).toHaveBeenCalledTimes(1);
+    expect(mocks.playerDrawResultCreate).toHaveBeenNthCalledWith(1, {
+      data: expect.objectContaining({ mode: "OPERATOR" }),
+    });
+    expect(mocks.playerDrawResultCreate).toHaveBeenNthCalledWith(2, {
+      data: expect.objectContaining({ mode: "RANDOM" }),
+    });
+    expect(mocks.playerDrawResultCreate).toHaveBeenNthCalledWith(3, {
+      data: expect.objectContaining({ mode: "RANDOM" }),
+    });
+  });
+
+  it("clears an invalid pending operator participant and falls back to secure random selection", async () => {
+    const { POST } = await import("@/app/api/player-draw/[publicCode]/spin/route");
+    mocks.playerDrawFindUnique.mockResolvedValue({
+      ...baseDraw,
+      pendingOperatorParticipantId: "participant-david",
+    });
+    mocks.playerParticipantFindFirst.mockResolvedValue(null);
+    mocks.playerParticipantFindMany.mockResolvedValue([participants[0]]);
+
+    const response = await POST(audienceRequest(), {
+      params: Promise.resolve({ publicCode: "PLAYTEST" }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual(expect.objectContaining({
+      participantId: "participant-ali",
+      displayName: "Ali",
+      mode: "RANDOM",
+    }));
+    expect(mocks.playerDrawUpdateMany).toHaveBeenCalledWith({
+      where: {
+        id: "player-draw-1",
+        pendingOperatorParticipantId: "participant-david",
+      },
+      data: { pendingOperatorParticipantId: null },
+    });
+  });
+
+  it("keeps an operator player draw safely rejected when no participants are eligible", async () => {
+    const { POST } = await import("@/app/api/player-draw/[publicCode]/spin/route");
+    mocks.playerDrawFindUnique.mockResolvedValue({
+      ...baseDraw,
+      pendingOperatorParticipantId: null,
+    });
+    mocks.playerParticipantFindMany.mockResolvedValue([]);
+
+    const response = await POST(audienceRequest(), {
+      params: Promise.resolve({ publicCode: "PLAYTEST" }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(mocks.playerDrawResultCreate).not.toHaveBeenCalled();
+  });
+
+  it("excludes a removed operator winner from the following random fallback draw", async () => {
+    const { POST } = await import("@/app/api/player-draw/[publicCode]/spin/route");
+    mocks.playerDrawFindUnique
+      .mockResolvedValueOnce({ ...baseDraw, removeWinnerAfterWin: true })
+      .mockResolvedValueOnce({
+        ...baseDraw,
+        removeWinnerAfterWin: true,
+        pendingOperatorParticipantId: null,
+      });
+    mocks.playerParticipantFindMany.mockResolvedValueOnce([participants[0]]);
+
+    const first = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "PLAYTEST" }) });
+    const second = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "PLAYTEST" }) });
+    const firstBody = await first.json();
+    const secondBody = await second.json();
+
+    expect(firstBody.participantId).toBe("participant-sarah");
+    expect(second.status).toBe(200);
+    expect(secondBody.participantId).toBe("participant-ali");
+    expect(mocks.playerParticipantUpdate).toHaveBeenNthCalledWith(1, {
+      where: { id: "participant-sarah" },
+      data: { isEligible: false },
+    });
+  });
+
+  it("leaves a previous operator winner eligible for random fallback when removal is off", async () => {
+    const { POST } = await import("@/app/api/player-draw/[publicCode]/spin/route");
+    mocks.playerDrawFindUnique
+      .mockResolvedValueOnce(baseDraw)
+      .mockResolvedValueOnce({ ...baseDraw, pendingOperatorParticipantId: null });
+    mocks.playerParticipantFindMany.mockResolvedValueOnce([participants[1]]);
+
+    const first = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "PLAYTEST" }) });
+    const second = await POST(audienceRequest(), { params: Promise.resolve({ publicCode: "PLAYTEST" }) });
+    const firstBody = await first.json();
+    const secondBody = await second.json();
+
+    expect(firstBody.participantId).toBe("participant-sarah");
+    expect(second.status).toBe(200);
+    expect(secondBody.participantId).toBe("participant-sarah");
+    expect(mocks.playerParticipantUpdate).not.toHaveBeenCalled();
+  });
+
+  it("keeps RANDOM mode on the secure server-side selection path", async () => {
+    const randomSpy = vi.spyOn(Math, "random");
+    const { POST } = await import("@/app/api/player-draw/[publicCode]/spin/route");
+    mocks.playerDrawFindUnique.mockResolvedValue({
+      ...baseDraw,
+      mode: "RANDOM",
+      pendingOperatorParticipantId: null,
+    });
+    mocks.playerParticipantFindMany.mockResolvedValue([participants[0]]);
+
+    const response = await POST(audienceRequest({ winner: "Sarah" }), {
+      params: Promise.resolve({ publicCode: "PLAYTEST" }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.participantId).toBe("participant-ali");
+    expect(body.mode).toBe("RANDOM");
+    expect(mocks.playerDrawUpdateMany).not.toHaveBeenCalled();
+    expect(randomSpy).not.toHaveBeenCalled();
+    randomSpy.mockRestore();
   });
 
   it("archived player audience draw cannot be used normally", async () => {

@@ -10,6 +10,7 @@ export type PlayerWinnerResult = {
   displayName: string;
   reference: string | null;
   timestamp: string;
+  mode: "OPERATOR" | "RANDOM";
 };
 
 export function PlayerWinnerModal({
@@ -32,6 +33,8 @@ export function PlayerWinnerModal({
   }
 
   const resultTime = formatPublicResultTime(result.timestamp);
+  const resultModeLabel =
+    result.mode === "OPERATOR" ? "Operator Draw" : "Random Draw";
 
   return (
     <div
@@ -69,6 +72,7 @@ export function PlayerWinnerModal({
           {[
             ["Winning Player", result.displayName],
             ...(result.reference ? [["Reference", result.reference]] : []),
+            ["Draw Mode", resultModeLabel],
             ["Time", resultTime.localTime ?? resultTime.utcTime],
             ...(resultTime.timezoneLabel ? [["Timezone", resultTime.timezoneLabel]] : []),
             ["UTC", resultTime.utcTime]

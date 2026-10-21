@@ -44,7 +44,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       displayName: result.displayName,
       reference: result.reference,
       eligibleCount: result.eligibleCount,
-      timestamp: result.timestamp
+      timestamp: result.timestamp,
+      mode: result.mode,
     });
   } catch (error) {
     if (error instanceof PlayerDrawNotFoundError) {
