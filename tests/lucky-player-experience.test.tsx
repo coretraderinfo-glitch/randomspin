@@ -304,7 +304,7 @@ describe("RandomSpin Player Draw public experience", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("Draw Player is not available until Setup Mode has eligible players and LIVE DRAW starts", () => {
+  it("keeps one shared LIVE DRAW action until Setup Mode has eligible players", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -773,7 +773,7 @@ describe("RandomSpin Player Draw public experience", () => {
   });
 
   it("keeps a private player audience presentation-only without an operator session", () => {
-    render(
+    const { container } = render(
       <LuckyPlayerHome
         initialParticipants={[]}
         mode={{
@@ -792,7 +792,7 @@ describe("RandomSpin Player Draw public experience", () => {
     );
 
     expect(
-      screen.queryByRole("button", { name: /DRAW PLAYER|DRAW AGAIN/i }),
+      screen.queryByRole("button", { name: /LIVE DRAW|DRAW PLAYER|DRAW AGAIN/i }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "SHUFFLE" }),
@@ -803,6 +803,72 @@ describe("RandomSpin Player Draw public experience", () => {
     expect(
       screen.queryByRole("button", { name: /EDIT PLAYERS/i }),
     ).not.toBeInTheDocument();
+    expect(container.querySelector(".player-draw-hero")).toBeInTheDocument();
+    expect(screen.getByText("2 PLAYERS READY")).toBeInTheDocument();
+    expect(screen.getByText("Name Roller")).toBeInTheDocument();
+  });
+
+  it("keeps the private operator in the shared ready layout until Edit Players is selected", () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      successfulPlayerResponse("Alice", "player-1"),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const publicView = render(
+      <LuckyPlayerHome initialParticipants={drawParticipants.slice(0, 2)} />,
+    );
+    expect(publicView.container.querySelector(".player-draw-hero")).toBeInTheDocument();
+    expect(publicView.container.querySelector(".event-panel")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "LIVE DRAW" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "DRAW PLAYER" })).not.toBeInTheDocument();
+    publicView.unmount();
+
+    const { container } = render(
+      <LuckyPlayerHome
+        initialParticipants={drawParticipants.slice(0, 2)}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "RANDOM DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 2,
+          eligibleCount: 2,
+          removeWinnerAfterWin: false,
+          showParticipantList: true,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "RANDOM",
+        }}
+      />,
+    );
+
+    expect(container.querySelector(".player-draw-hero")).toBeInTheDocument();
+    expect(container.querySelector(".event-panel")).toBeInTheDocument();
+    expect(screen.queryByText("Player Setup")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "LIVE DRAW" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "DRAW PLAYER" })).not.toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: "Shuffle participants, count 0" }),
+    ).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Reset shuffle count" })).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Shuffle participants, count 0" }),
+    );
+    expect(screen.getAllByRole("button", { name: "Reset shuffle count" })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "EDIT PLAYERS" }));
+
+    expect(screen.getByText("Player Setup")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Paste one player per line")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "LIVE DRAW" })).toHaveLength(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "LIVE DRAW" }));
+
+    expect(screen.queryByText("Player Setup")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "DRAWING" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("reflects a persisted private winner-removal setting on a fresh render", () => {
@@ -893,7 +959,7 @@ describe("RandomSpin Player Draw public experience", () => {
       removeWinnerAfterWin: true,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+    fireEvent.click(screen.getByRole("button", { name: "LIVE DRAW" }));
     await finishDraw();
 
     expect(screen.getByText("2 PLAYERS READY")).toBeInTheDocument();
@@ -1184,6 +1250,158 @@ describe("RandomSpin Player Draw public experience", () => {
     ).toBeDisabled();
   });
 
+  it("re-enables winner removal after a setup-started draw and later Draw Again round", async () => {
+    const privateParticipants = drawParticipants.slice(0, 2);
+    const settingsResponse = (removeWinnerAfterWin: boolean) =>
+      new Response(
+        JSON.stringify({
+          draw: {
+            removeWinnerAfterWin,
+            participants: privateParticipants,
+            updatedAt: "2026-08-21T00:01:00.000Z",
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(successfulPlayerResponse("Alice", "player-1"))
+      .mockResolvedValueOnce(settingsResponse(true))
+      .mockResolvedValueOnce(successfulPlayerResponse("Ben", "player-2"))
+      .mockResolvedValueOnce(settingsResponse(false));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <LuckyPlayerHome
+        initialParticipants={privateParticipants}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "RANDOM DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 2,
+          eligibleCount: 2,
+          removeWinnerAfterWin: false,
+          showParticipantList: true,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "RANDOM",
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "EDIT PLAYERS" }));
+    fireEvent.click(screen.getByRole("button", { name: "LIVE DRAW" }));
+    await finishDraw();
+
+    const winnerRemoval = screen.getByRole("checkbox", {
+      name: "Remove winner after win",
+    });
+    expect(winnerRemoval).toBeEnabled();
+    fireEvent.click(winnerRemoval);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(winnerRemoval).toBeChecked();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/player-draws/player-draw-1",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Draw Again",
+      }),
+    );
+    await finishDraw();
+
+    expect(winnerRemoval).toBeEnabled();
+    fireEvent.click(winnerRemoval);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(winnerRemoval).not.toBeChecked();
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("re-enables winner removal after an empty private draw is populated through setup", async () => {
+    const savedParticipants = drawParticipants.slice(0, 2);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            participants: savedParticipants,
+            revision: "2026-08-21T00:01:00.000Z",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(successfulPlayerResponse("Alice", "player-1"))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            draw: {
+              removeWinnerAfterWin: true,
+              participants: savedParticipants,
+              updatedAt: "2026-08-21T00:02:00.000Z",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <LuckyPlayerHome
+        initialParticipants={[]}
+        mode={{
+          kind: "private",
+          publicCode: "PLAYTEST",
+          spinEndpoint: "/api/player-draw/PLAYTEST/spin",
+          label: "RANDOM DRAW",
+          eventName: "Friday Player Draw",
+          participantCount: 0,
+          eligibleCount: 0,
+          removeWinnerAfterWin: false,
+          showParticipantList: true,
+          canOperate: true,
+          drawId: "player-draw-1",
+          drawMode: "RANDOM",
+          revision: "2026-08-21T00:00:00.000Z",
+        }}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("Paste one player per line"), {
+      target: { value: "Alice\nBen" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "USE NAMES" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "LIVE DRAW" }));
+    await finishDraw();
+
+    const winnerRemoval = screen.getByRole("checkbox", {
+      name: "Remove winner after win",
+    });
+    expect(winnerRemoval).toBeEnabled();
+    fireEvent.click(winnerRemoval);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(winnerRemoval).toBeChecked();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/admin/player-draws/player-draw-1",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+
   it("persists private operator participant replacement before updating the live list", async () => {
     const savedParticipants = [
       { id: "alice", displayName: "Alice", reference: null, isEligible: true },
@@ -1232,7 +1450,7 @@ describe("RandomSpin Player Draw public experience", () => {
     );
   });
 
-  it("locks both draw actions until a private participant save succeeds", async () => {
+  it("locks the private setup draw until a participant save succeeds", async () => {
     let resolveSave: ((response: Response) => void) | undefined;
     const fetchMock = vi.fn().mockImplementation(
       () => new Promise<Response>((resolve) => {
@@ -1271,8 +1489,8 @@ describe("RandomSpin Player Draw public experience", () => {
       await Promise.resolve();
     });
     expect(screen.getByRole("button", { name: "LIVE DRAW" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "DRAW PLAYER" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+    expect(screen.queryByRole("button", { name: "DRAW PLAYER" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "LIVE DRAW" }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     resolveSave?.(
@@ -1292,7 +1510,7 @@ describe("RandomSpin Player Draw public experience", () => {
     });
 
     expect(screen.getByRole("button", { name: "LIVE DRAW" })).not.toBeDisabled();
-    expect(screen.getByRole("button", { name: "DRAW PLAYER" })).not.toBeDisabled();
+    expect(screen.queryByRole("button", { name: "DRAW PLAYER" })).not.toBeInTheDocument();
   });
 
   it("resyncs the authoritative participant list and reports a revision conflict", async () => {
@@ -1332,6 +1550,7 @@ describe("RandomSpin Player Draw public experience", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "EDIT PLAYERS" }));
     fireEvent.change(screen.getByPlaceholderText("Paste one player per line"), {
       target: { value: "Alice\nBen" },
     });
@@ -1375,7 +1594,7 @@ describe("RandomSpin Player Draw public experience", () => {
 
     expect(screen.queryByText("Alice")).not.toBeInTheDocument();
     expect(screen.queryByText("A-001")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+    fireEvent.click(screen.getByRole("button", { name: "LIVE DRAW" }));
     await act(async () => {
       await Promise.resolve();
       await vi.advanceTimersByTimeAsync(3500);
@@ -1416,7 +1635,7 @@ describe("RandomSpin Player Draw public experience", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+    fireEvent.click(screen.getByRole("button", { name: "LIVE DRAW" }));
     await finishDraw();
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
@@ -1447,6 +1666,7 @@ describe("RandomSpin Player Draw public experience", () => {
     );
 
     expect(screen.queryByText("Alice")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "EDIT PLAYERS" }));
     fireEvent.click(screen.getByRole("button", { name: "OPEN PRIVATE EDITOR" }));
     expect(screen.getByText("Alice")).toBeInTheDocument();
     expect(screen.getByText("Reference: A-001")).toBeInTheDocument();
@@ -1488,6 +1708,7 @@ describe("RandomSpin Player Draw public experience", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "EDIT PLAYERS" }));
     fireEvent.click(screen.getAllByRole("button", { name: "Shuffle participants, count 0" })[0]);
     fireEvent.change(screen.getByPlaceholderText("Add player name"), {
       target: { value: "Dina" },
@@ -1507,7 +1728,7 @@ describe("RandomSpin Player Draw public experience", () => {
     );
   });
 
-  it("keeps Draw Player disabled when a private player draw has zero eligible players", () => {
+  it("keeps Live Draw disabled when a private player draw has zero eligible players", () => {
     render(
       <LuckyPlayerHome
         initialParticipants={[]}
@@ -1525,7 +1746,7 @@ describe("RandomSpin Player Draw public experience", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "DRAW PLAYER" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "LIVE DRAW" })).toBeDisabled();
   });
 
   it("private recent winners stay hidden when the private setting is off", () => {
@@ -1697,7 +1918,7 @@ describe("RandomSpin Player Draw public experience", () => {
     );
 
     expect(screen.queryByText("WINNING PLAYER")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "DRAW PLAYER" }));
+    fireEvent.click(screen.getByRole("button", { name: "LIVE DRAW" }));
     await finishDraw();
 
     expect(fetchMock).toHaveBeenCalledWith(

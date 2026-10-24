@@ -261,6 +261,13 @@ export function LuckyPlayerHome({
   const [confirmClearAll, setConfirmClearAll] = useState(false);
   const [confetti, setConfetti] = useState(false);
   const [liveMode, setLiveMode] = useState(false);
+  const [editingPlayers, setEditingPlayers] = useState(
+    () =>
+      mode.kind === "public" ||
+      (mode.kind === "private" &&
+        mode.canOperate !== false &&
+        initialParticipants.length === 0),
+  );
   const [shuffleCount, setShuffleCount] = useState(() =>
     getInitialShuffleCount(mode, initialParticipants),
   );
@@ -286,21 +293,22 @@ export function LuckyPlayerHome({
   const previousParticipantMembershipRef = useRef(
     getParticipantMembershipKey(initialParticipants),
   );
+  const privateMode = mode.kind === "private";
+  const canOperatePrivateDraw = !privateMode || mode.canOperate !== false;
   const drawButtonLabel =
     phase === "ERROR"
       ? "TRY AGAIN"
       : hasCompletedDraw
         ? "DRAW AGAIN"
-        : "DRAW PLAYER";
-  const privateMode = mode.kind === "private";
-  const canOperatePrivateDraw = !privateMode || mode.canOperate !== false;
+        : "LIVE DRAW";
   const playerControlsLocked =
     spinning || savingPlayers || savingWinnerRemoval;
   const showSetupControls =
-    (!privateMode || canOperatePrivateDraw) && !liveMode;
-  const showLiveControls = (privateMode && canOperatePrivateDraw) || liveMode;
-  const showPrivateResultActions =
-    privateMode &&
+    canOperatePrivateDraw && editingPlayers;
+  const showLiveControls =
+    canOperatePrivateDraw &&
+    (privateMode ? !showSetupControls : liveMode);
+  const showResultActions =
     canOperatePrivateDraw &&
     hasCompletedDraw &&
     phase === "COMPLETE" &&
@@ -343,10 +351,9 @@ export function LuckyPlayerHome({
   const showRecentWinners =
     (mode.kind === "public" || mode.showRecentWinners === true) &&
     (showLiveControls || recentWinners.length > 0);
-  const liveBadgeLabel =
-    privateMode && completedRoundMode
-      ? `${completedRoundMode} DRAW`
-      : mode.label;
+  const liveBadgeLabel = completedRoundMode
+    ? `${completedRoundMode} DRAW`
+    : mode.label ?? "RANDOM DRAW";
 
   useEffect(() => {
     if (!shouldScrollToPlayerSetupRef.current || !showSetupControls) {
@@ -986,6 +993,7 @@ export function LuckyPlayerHome({
       return;
     }
 
+    setEditingPlayers(false);
     setLiveMode(true);
     void drawPlayer();
   }
@@ -1000,7 +1008,7 @@ export function LuckyPlayerHome({
   }
 
   function editPlayers() {
-    if (!privateMode || !canOperatePrivateDraw || playerControlsLocked) {
+    if (!canOperatePrivateDraw || playerControlsLocked) {
       return;
     }
 
@@ -1014,6 +1022,7 @@ export function LuckyPlayerHome({
     setHasCompletedDraw(false);
     setCompletedRoundMode(null);
     setLiveMode(false);
+    setEditingPlayers(true);
   }
 
   async function updateWinnerRemoval(nextValue: boolean) {
@@ -1022,7 +1031,6 @@ export function LuckyPlayerHome({
       !canOperatePrivateDraw ||
       playerControlsLocked ||
       winnerRemovalSaveInFlightRef.current ||
-      liveMode ||
       !mode.drawId ||
       !mode.drawMode
     ) {
@@ -1107,7 +1115,7 @@ export function LuckyPlayerHome({
               <p className="text-xs font-black uppercase tracking-[0.32em] text-[#f6d98f]">
                 RandomSpin Player Draw
               </p>
-              {privateMode ? (
+            {liveBadgeLabel ? (
                 <span className="event-status-pill rounded-full px-3 py-1 text-[0.65rem] font-black uppercase tracking-[0.18em] text-[#dfe6f6]">
                   {liveBadgeLabel}
                 </span>
@@ -1172,15 +1180,17 @@ export function LuckyPlayerHome({
                     <Shuffle className="size-4 text-[#f6d98f]" />
                     SHUFFLE {shuffleCount}×
                   </button>
-                  <button
-                    className="focus-ring min-h-12 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-xs font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
-                    type="button"
-                    disabled={playerControlsLocked || shuffleCount === 0}
-                    onClick={resetShuffleCount}
-                    aria-label="Reset shuffle count"
-                  >
-                    RESET COUNT
-                  </button>
+                  {shuffleCount > 0 ? (
+                    <button
+                      className="focus-ring min-h-12 rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-xs font-black uppercase tracking-[0.12em] text-white hover:bg-white/12 disabled:opacity-60"
+                      type="button"
+                      disabled={playerControlsLocked}
+                      onClick={resetShuffleCount}
+                      aria-label="Reset shuffle count"
+                    >
+                      RESET COUNT
+                    </button>
+                  ) : null}
                   <button
                     className="focus-ring rounded-lg border border-white/12 bg-white/8 px-4 py-3 text-sm font-black text-white hover:bg-white/12 disabled:opacity-60"
                     type="button"
@@ -1304,29 +1314,6 @@ export function LuckyPlayerHome({
               </div>
             ) : null}
 
-            {privateMode && canOperatePrivateDraw ? (
-              <label className="mt-4 flex w-fit items-start gap-3 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-[#dfe6f6]">
-                <input
-                  className="mt-0.5 size-4 accent-[#f6d98f]"
-                  type="checkbox"
-                  aria-label="Remove winner after win"
-                  checked={removeWinnerAfterWin}
-                  disabled={playerControlsLocked || liveMode}
-                  onChange={(event) =>
-                    void updateWinnerRemoval(event.target.checked)
-                  }
-                />
-                <span>
-                  <span className="block font-black uppercase tracking-[0.12em] text-white">
-                    Remove winner after win
-                  </span>
-                  <span className="mt-1 block text-xs leading-5 text-[#aeb7ca]">
-                    Winner stays in history but cannot win again.
-                  </span>
-                </span>
-              </label>
-            ) : null}
-
             {showLiveControls ? (
               <div className="mt-5 grid gap-3">
                 <div className="flex flex-wrap items-center gap-3">
@@ -1338,24 +1325,14 @@ export function LuckyPlayerHome({
                   >
                     {spinning ? "DRAWING" : drawButtonLabel}
                   </button>
-                  {showPrivateResultActions ? (
-                    <button
-                      className="event-action focus-ring min-h-12 rounded-xl px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-white"
-                      type="button"
-                      onClick={editPlayers}
-                    >
-                      EDIT PLAYERS
-                    </button>
-                  ) : !privateMode ? (
-                    <button
-                      className="event-action focus-ring min-h-12 rounded-xl px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-white"
-                      type="button"
-                      disabled={spinning}
-                      onClick={() => setLiveMode(false)}
-                    >
-                      EDIT PLAYERS
-                    </button>
-                  ) : null}
+                  <button
+                    className="event-action focus-ring min-h-12 rounded-xl px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-white"
+                    type="button"
+                    disabled={playerControlsLocked}
+                    onClick={editPlayers}
+                  >
+                    EDIT PLAYERS
+                  </button>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                   <button
@@ -1368,15 +1345,32 @@ export function LuckyPlayerHome({
                     <Shuffle className="size-4 text-[#f6d98f]" />
                     SHUFFLE {shuffleCount}×
                   </button>
-                  <button
-                    className="event-action focus-ring min-h-11 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-[0.12em] text-white disabled:opacity-60"
-                    type="button"
-                    disabled={playerControlsLocked || shuffleCount === 0}
-                    onClick={resetShuffleCount}
-                    aria-label="Reset shuffle count"
-                  >
-                    RESET COUNT
-                  </button>
+                  {privateMode ? (
+                    <label className="event-action focus-ring flex min-h-11 items-center gap-2 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-[0.1em] text-white">
+                      <input
+                        className="size-4 accent-[#f6d98f]"
+                        type="checkbox"
+                        aria-label="Remove winner after win"
+                        checked={removeWinnerAfterWin}
+                        disabled={playerControlsLocked}
+                        onChange={(event) =>
+                          void updateWinnerRemoval(event.target.checked)
+                        }
+                      />
+                      Remove winner
+                    </label>
+                  ) : null}
+                  {shuffleCount > 0 ? (
+                    <button
+                      className="event-action focus-ring min-h-11 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-[0.12em] text-white disabled:opacity-60"
+                      type="button"
+                      disabled={playerControlsLocked}
+                      onClick={resetShuffleCount}
+                      aria-label="Reset shuffle count"
+                    >
+                      RESET COUNT
+                    </button>
+                  ) : null}
                   <button
                     className="event-icon-action focus-ring size-12 rounded-xl text-white"
                     onClick={() => setSoundEnabled((value) => !value)}
@@ -1630,8 +1624,8 @@ export function LuckyPlayerHome({
         result={result}
         onClose={() => setResult(null)}
         onShare={shareResult}
-        onDrawAgain={showPrivateResultActions ? drawAgain : undefined}
-        onEditPlayers={showPrivateResultActions ? editPlayers : undefined}
+        onDrawAgain={showResultActions ? drawAgain : undefined}
+        onEditPlayers={showResultActions ? editPlayers : undefined}
         canDrawAgain={eligibleCount > 0 && !playerControlsLocked}
       />
     </main>
